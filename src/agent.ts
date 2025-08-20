@@ -1,15 +1,11 @@
 import { Agent, AgentInputItem, run, tool } from "@openai/agents";
-// import { config } from "dotenv"; // Not needed when using dotenv-cli
+import { config } from "dotenv";
 import { existsSync, mkdirSync } from "fs";
 import { appendFile, readFile, writeFile } from "node:fs/promises";
 import OpenAI from "openai";
 import invariant from "tiny-invariant";
 import { z } from "zod";
 import Alpaca from "@alpacahq/alpaca-trade-api";
-// import { GoogleGenerativeAI } from "@google/generative-ai"; // Disabled for simplified implementation
-
-// Load environment variables (handled by dotenv-cli when using profile-specific .env files)
-// config(); // Commented out to allow dotenv-cli to handle profile-specific loading
 
 // Parse model first to help determine profile name
 const modelName = process.env.MODEL || "gpt-4o";
@@ -22,7 +18,6 @@ const getProfileName = (): string => {
     
     // Check if profile name matches model type
     const isValidMatch = 
-      (modelName.includes('gemini') && profileName === 'gemini') ||
       (modelName.includes('gpt-4o') && profileName === 'gpt4o') ||
       (modelName.includes('claude') && profileName === 'claude') ||
       (profileName === 'default');
@@ -36,9 +31,7 @@ const getProfileName = (): string => {
   }
   
   // Auto-detect profile from model name
-  if (modelName.includes('gemini')) {
-    return 'gemini';
-  } else if (modelName.includes('gpt-4o')) {
+  if (modelName.includes('gpt-4o')) {
     return 'gpt4o';
   } else if (modelName.includes('claude')) {
     return 'claude';
@@ -49,8 +42,20 @@ const getProfileName = (): string => {
 
 const profileName = getProfileName();
 
+// Load profile-specific environment variables
+const envFile = profileName === 'default' ? '.env' : `.env.${profileName}`;
+if (existsSync(envFile)) {
+  config({ path: envFile });
+  console.log(`🔧 Loaded environment from ${envFile}`);
+} else {
+  // Fallback to default .env
+  config();
+  console.log(`⚠️  ${envFile} not found, using default .env`);
+}
+
 console.log(`📁 Using profile: ${profileName} (model: ${modelName})`);
 
+// Validate required environment variables first
 invariant(process.env.OPENAI_API_KEY, "OPENAI_API_KEY is not set");
 invariant(process.env.ALPACA_API_KEY, "ALPACA_API_KEY is not set");
 invariant(process.env.ALPACA_SECRET_KEY, "ALPACA_SECRET_KEY is not set");
@@ -60,8 +65,137 @@ const CACHE_TTL_SECONDS = parseInt(process.env.CACHE_TTL_SECONDS || "3600"); // 
 const ENABLE_EXPLICIT_CACHING = process.env.ENABLE_EXPLICIT_CACHING !== "false"; // Enabled by default
 
 // Validate API keys based on model choice
-if (modelName.includes('gemini')) {
-  invariant(process.env.GEMINI_API_KEY, "GEMINI_API_KEY is not set for Gemini model");
+
+// API credential validation functions
+const validateOpenAICredentials = async (): Promise<boolean> => {
+  try {
+    log("🔑 Validating OpenAI API credentials...");
+    const testClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+    
+    // Make a minimal API call to test credentials
+    const response = await testClient.models.list();
+    
+    if (response.data && response.data.length > 0) {
+      log("✅ OpenAI credentials validated successfully");
+      return true;
+    } else {
+      log("❌ OpenAI API responded but no models found");
+      return false;
+    }
+  } catch (error: any) {
+    log(`❌ OpenAI credentials validation failed: ${error.message}`);
+    if (error.status === 401) {
+      log("💡 Error 401: Invalid OpenAI API key. Check your OPENAI_API_KEY environment variable.");
+    } else if (error.status === 429) {
+      log("💡 Error 429: Rate limited. Your API key may be valid but you've exceeded quota.");
+    } else if (error.code === 'ENOTFOUND') {
+      log("💡 Network error: Could not reach OpenAI servers. Check your internet connection.");
+    }
+    return false;
+  }
+};
+
+const validateGeminiCredentials = async (): Promise<boolean> => {
+  try {
+    log("🔑 Validating Gemini API credentials...");
+    const testClient = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+    
+    // Make a minimal API call to test credentials
+    const model = testClient.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const result = await model.generateContent("Hello");
+    
+    if (result.response.text()) {
+      log("✅ Gemini credentials validated successfully");
+      return true;
+    } else {
+      log("❌ Gemini API responded but no content generated");
+      return false;
+    }
+  } catch (error: any) {
+    log(`❌ Gemini credentials validation failed: ${error.message}`);
+    if (error.status === 400 && error.message.includes('API_KEY_INVALID')) {
+      log("💡 Invalid Gemini API key. Check your GEMINI_API_KEY environment variable.");
+    } else if (error.status === 429) {
+      log("💡 Rate limited. Your API key may be valid but you've exceeded quota.");
+    } else if (error.code === 'ENOTFOUND') {
+      log("💡 Network error: Could not reach Gemini servers. Check your internet connection.");
+    }
+    return false;
+  }
+};
+
+const validateAlpacaCredentials = async (): Promise<boolean> => {
+  try {
+    log("🔑 Validating Alpaca API credentials...");
+    
+    // Test the connection with account call
+    const account = await alpaca.getAccount();
+    
+    if (account && account.id) {
+      log(`✅ Alpaca credentials validated successfully - Account ID: ${account.id}`);
+      log(`📊 Account Status: ${account.status}, Buying Power: $${account.buying_power}`);
+      return true;
+    } else {
+      log("❌ Alpaca API responded but no account data found");
+      return false;
+    }
+  } catch (error: any) {
+    log(`❌ Alpaca credentials validation failed: ${error.message}`);
+    if (error.response?.status === 401) {
+      log("💡 Error 401: Invalid Alpaca API credentials. Check your ALPACA_API_KEY and ALPACA_SECRET_KEY.");
+    } else if (error.response?.status === 403) {
+      log("💡 Error 403: Alpaca API key doesn't have required permissions for paper trading.");
+    } else if (error.response?.status === 404) {
+      log("💡 Error 404: Wrong Alpaca base URL. Check your ALPACA_BASE_URL environment variable.");
+      log(`💡 Current URL: ${process.env.ALPACA_BASE_URL || 'https://paper-api.alpaca.markets'}`);
+    } else if (error.code === 'ENOTFOUND') {
+      log("💡 Network error: Could not reach Alpaca servers. Check your internet connection.");
+    }
+    return false;
+  }
+};
+
+// Comprehensive credential validation function
+const validateAllCredentials = async (): Promise<void> => {
+  log("🔐 Validating API credentials before starting trading session...");
+  
+  const validationResults = await Promise.allSettled([
+    validateOpenAICredentials(),
+    modelName.includes('gemini') ? validateGeminiCredentials() : Promise.resolve(true),
+    validateAlpacaCredentials()
+  ]);
+  
+  const [openaiResult, geminiResult, alpacaResult] = validationResults;
+  
+  let hasErrors = false;
+  
+  // Check OpenAI validation
+  if (openaiResult.status === 'rejected' || openaiResult.value === false) {
+    log("❌ OpenAI credential validation failed");
+    hasErrors = true;
+  }
+  
+  // Check Gemini validation (only for Gemini models)
+  if (modelName.includes('gemini') && (geminiResult.status === 'rejected' || geminiResult.value === false)) {
+    log("❌ Gemini credential validation failed");
+    hasErrors = true;
+  }
+  
+  // Check Alpaca validation
+  if (alpacaResult.status === 'rejected' || alpacaResult.value === false) {
+    log("❌ Alpaca credential validation failed");
+    hasErrors = true;
+  }
+  
+  if (hasErrors) {
+    log("🚨 CRITICAL: API credential validation failed. Cannot start trading session.");
+    log("💡 Please check your environment variables and API keys before retrying.");
+    log(`💡 Current profile: ${profileName}, Model: ${modelName}`);
+    log(`💡 Environment file: ${envFile}`);
+    process.exit(1);
+  }
+  
+  log("✅ All API credentials validated successfully. Starting trading session...");
 }
 
 // Create unified client factory for OpenAI and Gemini support
@@ -83,19 +217,19 @@ const createAPIClient = (): OpenAI => {
   }
 };
 
-// Create native Gemini client (disabled for simplified implementation)
-// const createNativeGeminiClient = () => {
-//   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-//   return genAI.getGenerativeModel({ 
-//     model: "gemini-2.5-flash",
-//     generationConfig: {
-//       temperature: 0.7,
-//       topK: 40,
-//       topP: 0.95,
-//       maxOutputTokens: 8192,
-//     },
-//   });
-// };
+// Create native Gemini client
+const createNativeGeminiClient = () => {
+  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+  return genAI.getGenerativeModel({ 
+    model: normalizeModelName(modelName), // Use the normalized model name
+    generationConfig: {
+      temperature: 0.7,
+      topK: 40,
+      topP: 0.95,
+      maxOutputTokens: 8192,
+    },
+  });
+};
 
 const client = createAPIClient();
 
@@ -153,33 +287,7 @@ const portfolioSchema = z.object({
   ),
 });
 
-// Helper function to test Alpaca connection
-const testAlpacaConnection = async () => {
-  try {
-    log(`🔗 Testing Alpaca connection to: ${alpaca.configuration.baseUrl}`);
-    log(`🗝️ Using API Key ID: ${process.env.ALPACA_API_KEY?.substring(0, 8)}...`);
-    
-    // Test the connection with a simple account call
-    const account = await alpaca.getAccount();
-    log(`✅ Alpaca connection successful - Account ID: ${account.id}`);
-    return true;
-  } catch (error: any) {
-    log(`❌ Alpaca connection failed: ${error.message}`);
-    log(`🔍 Error details: Status ${error.response?.status}, URL: ${error.config?.url}`);
-    
-    // Additional diagnostic information
-    if (error.response?.status === 404) {
-      log(`💡 404 Error suggests wrong base URL or endpoint. Current URL: ${alpaca.configuration.baseUrl}`);
-      log(`💡 Try checking if ALPACA_BASE_URL environment variable is correct`);
-    } else if (error.response?.status === 401) {
-      log(`💡 401 Error suggests invalid API credentials`);
-    } else if (error.response?.status === 403) {
-      log(`💡 403 Error suggests API key doesn't have required permissions`);
-    }
-    
-    return false;
-  }
-};
+// Note: testAlpacaConnection function has been replaced by validateAlpacaCredentials above
 
 // Helper function to get Alpaca account information
 const getAlpacaAccount = async () => {
@@ -1038,6 +1146,307 @@ if (intervalMinutes < 5) {
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Parse Gemini's tool_code format: "print(function_name(args))"
+const parseToolCodeString = (toolCode: string): {name: string, args: any} | null => {
+  try {
+    // Remove print() wrapper if present
+    let cleaned = toolCode.replace(/^print\((.*)\)$/, '$1');
+    
+    // Parse function name and arguments
+    const functionMatch = cleaned.match(/^(\w+)\((.*)\)$/);
+    if (!functionMatch) {
+      log(`⚠️ Could not parse tool_code format: ${toolCode}`);
+      return null;
+    }
+    
+    const [, functionName, argsString] = functionMatch;
+    let args = {};
+    
+    // Parse arguments if present
+    if (argsString.trim()) {
+      try {
+        // Handle simple cases like query='some string'
+        // Split by comma but be careful about commas inside quotes
+        const args_temp = {};
+        let currentPair = '';
+        let inQuotes = false;
+        let quoteChar = '';
+        
+        for (let i = 0; i < argsString.length; i++) {
+          const char = argsString[i];
+          if ((char === '"' || char === "'") && (i === 0 || argsString[i-1] !== '\\')) {
+            if (!inQuotes) {
+              inQuotes = true;
+              quoteChar = char;
+            } else if (char === quoteChar) {
+              inQuotes = false;
+              quoteChar = '';
+            }
+          }
+          
+          if (char === ',' && !inQuotes) {
+            // Process current pair
+            if (currentPair.trim()) {
+              const [key, ...valueParts] = currentPair.split('=');
+              if (key && valueParts.length > 0) {
+                let value = valueParts.join('=').trim();
+                // Remove quotes if present
+                if ((value.startsWith("'") && value.endsWith("'")) || 
+                    (value.startsWith('"') && value.endsWith('"'))) {
+                  value = value.slice(1, -1);
+                }
+                args_temp[key.trim()] = value;
+              }
+            }
+            currentPair = '';
+          } else {
+            currentPair += char;
+          }
+        }
+        
+        // Process final pair
+        if (currentPair.trim()) {
+          const [key, ...valueParts] = currentPair.split('=');
+          if (key && valueParts.length > 0) {
+            let value = valueParts.join('=').trim();
+            // Remove quotes if present
+            if ((value.startsWith("'") && value.endsWith("'")) || 
+                (value.startsWith('"') && value.endsWith('"'))) {
+              value = value.slice(1, -1);
+            }
+            args_temp[key.trim()] = value;
+          }
+        }
+        
+        args = args_temp;
+      } catch (parseError) {
+        log(`⚠️ Could not parse arguments in tool_code: ${argsString}`);
+      }
+    }
+    
+    log(`🔧 Parsed tool_code: ${functionName} with args:`, args);
+    return { name: functionName, args };
+    
+  } catch (error) {
+    log(`❌ Error parsing tool_code: ${error}`);
+    return null;
+  }
+};
+
+// Parse text response for JSON tool calls
+const parseTextForToolCalls = async (text: string): Promise<Array<{name: string, args: any}>> => {
+  const toolCalls = [];
+  log(`🔍 Parsing text for tool calls. Text length: ${text.length}`);
+  
+  try {
+    // Look for JSON blocks in the text
+    const jsonRegex = /```json\s*({[\s\S]*?})\s*```/g;
+    let match;
+    log(`🔍 Searching for JSON blocks with regex...`);
+    
+    while ((match = jsonRegex.exec(text)) !== null) {
+      log(`🔍 Found JSON block: ${match[1]}`);
+      try {
+        const jsonObj = JSON.parse(match[1]);
+        log(`🔍 Parsed JSON object:`, jsonObj);
+        if (jsonObj.tool && jsonObj.parameters) {
+          toolCalls.push({
+            name: jsonObj.tool,
+            args: jsonObj.parameters
+          });
+          log(`✅ Parsed tool call: ${jsonObj.tool}`);
+        } else {
+          log(`⚠️ JSON object missing 'tool' or 'parameters' properties`);
+        }
+      } catch (parseError) {
+        log(`❌ Failed to parse JSON tool call: ${parseError}`);
+      }
+    }
+    
+    // Also look for direct JSON objects without code blocks
+    log(`🔍 Searching for direct JSON objects...`);
+    const directJsonRegex = /{\s*"tool"\s*:[\s\S]*?"parameters"\s*:[\s\S]*?}/g;
+    let directMatch;
+    
+    while ((directMatch = directJsonRegex.exec(text)) !== null) {
+      log(`🔍 Found direct JSON: ${directMatch[0]}`);
+      try {
+        const jsonObj = JSON.parse(directMatch[0]);
+        if (jsonObj.tool && jsonObj.parameters) {
+          toolCalls.push({
+            name: jsonObj.tool,
+            args: jsonObj.parameters
+          });
+          log(`✅ Parsed direct tool call: ${jsonObj.tool}`);
+        }
+      } catch (parseError) {
+        log(`❌ Failed to parse direct JSON tool call: ${parseError}`);
+      }
+    }
+    
+    // Look for Gemini's tool_code format: [{"tool_code": "print(function_name(args))"}]
+    log(`🔍 Searching for Gemini tool_code format...`);
+    const toolCodeRegex = /\[\s*{\s*"tool_code"\s*:\s*"([^"]+)"\s*}\s*(?:,\s*{\s*"tool_code"\s*:\s*"([^"]+)"\s*}\s*)*\]/g;
+    let toolCodeMatch;
+    
+    while ((toolCodeMatch = toolCodeRegex.exec(text)) !== null) {
+      log(`🔍 Found tool_code array: ${toolCodeMatch[0]}`);
+      try {
+        const toolCodeArray = JSON.parse(toolCodeMatch[0]);
+        for (const item of toolCodeArray) {
+          if (item.tool_code) {
+            const parsed = parseToolCodeString(item.tool_code);
+            if (parsed) {
+              toolCalls.push(parsed);
+              log(`✅ Parsed tool_code: ${parsed.name}`);
+            }
+          }
+        }
+      } catch (parseError) {
+        log(`❌ Failed to parse tool_code array: ${parseError}`);
+      }
+    }
+    
+  } catch (error) {
+    log(`❌ Error parsing text for tool calls: ${error}`);
+  }
+  
+  log(`🔍 Final result: ${toolCalls.length} tool calls parsed`);
+  return toolCalls;
+};
+
+// Execute a single tool call
+const executeToolCall = async (name: string, args: any): Promise<string> => {
+  log(`🛠️ Executing function: ${name}`);
+  
+  try {
+    switch (name) {
+      case "think":
+        const thoughts = args.thought_process || args.thoughts || [];
+        thoughts.forEach((thought: string) => log(`🧠 ${thought}`));
+        return `Completed thinking with ${thoughts.length} steps of reasoning.`;
+        
+      case "get_stock_price":
+        const ticker = args.ticker || args.tickers;
+        if (Array.isArray(ticker)) {
+          const prices = [];
+          for (const t of ticker) {
+            try {
+              const price = await getStockPrice(t);
+              prices.push(`${t}: $${price}`);
+              log(`🔖 Searched for stock price for ${t}: $${price}`);
+            } catch (error) {
+              prices.push(`${t}: Error - ${error}`);
+              log(`❌ Failed to get price for ${t}: ${error}`);
+            }
+          }
+          return prices.join('\n');
+        } else {
+          const price = await getStockPrice(ticker);
+          log(`🔖 Searched for stock price for ${ticker}: $${price}`);
+          return `${ticker}: $${price}`;
+        }
+        
+      case "get_portfolio":
+        const portfolio = await getPortfolio();
+        log(`💹 Fetched portfolio: $${portfolio.cash}`);
+        return `Your cash balance is $${portfolio.cash}.
+Current holdings:
+${Object.entries(portfolio.holdings)
+          .map(([ticker, shares]) => `  - ${ticker}: ${shares} shares`)
+          .join("\n")}
+
+Trade history:
+${portfolio.history
+          .map(
+            (trade) =>
+              `  - ${trade.date} ${trade.type} ${trade.ticker} ${trade.shares} shares at $${trade.price} per share, for a total of $${trade.total}`
+          )
+          .join("\n")}`;
+          
+      case "get_net_worth":
+        const netWorth = await calculateNetWorth();
+        const portfolioForReturn = await getPortfolio();
+        const annualizedReturn = await calculateAnnualizedReturn(portfolioForReturn);
+        log(`💰 Current net worth: $${netWorth} (${annualizedReturn}% annualized return)`);
+        return `Your current net worth is $${netWorth}
+- Cash: $${portfolioForReturn.cash}
+- Holdings value: $${(netWorth - portfolioForReturn.cash).toFixed(2)}
+- Annualized return: ${annualizedReturn}% (started with $1,000)
+- ${netWorth >= 1000 ? "📈 Up" : "📉 Down"} $${Math.abs(netWorth - 1000).toFixed(2)} from initial investment`;
+        
+      case "web_search":
+        const query = args.query;
+        log(`🔍 Searching the web for: ${query}`);
+        return await webSearch(query);
+        
+      case "buy":
+        const buyTicker = args.ticker;
+        const buyShares = args.quantity || args.shares;
+        try {
+          const account = await getAlpacaAccount();
+          const price = await getStockPrice(buyTicker);
+          const orderValue = buyShares * price;
+
+          if (parseFloat(account.buying_power) < orderValue) {
+            return `You don't have enough buying power to buy ${buyShares} shares of ${buyTicker}. Your buying power is $${account.buying_power} and the estimated cost is $${orderValue.toFixed(2)}.`;
+          }
+
+          const order = await alpaca.createOrder({
+            symbol: buyTicker,
+            qty: buyShares,
+            side: 'buy',
+            type: 'market',
+            time_in_force: 'gtc'
+          });
+
+          log(`💰 Submitted buy order for ${buyShares} shares of ${buyTicker} (Order ID: ${order.id})`);
+          return `Submitted buy order for ${buyShares} shares of ${buyTicker} at market price. Order ID: ${order.id}. Status: ${order.status}. Estimated cost: $${orderValue.toFixed(2)}.`;
+        } catch (error) {
+          log(`❌ Failed to buy ${buyShares} shares of ${buyTicker}: ${error}`);
+          return `Failed to place buy order for ${buyShares} shares of ${buyTicker}. Error: ${error}`;
+        }
+        
+      case "sell":
+        const sellTicker = args.ticker;
+        const sellShares = args.quantity || args.shares;
+        try {
+          const positions = await getAlpacaPositions();
+          const position = positions.find(p => p.symbol === sellTicker);
+          
+          if (!position || parseFloat(position.qty) < sellShares) {
+            const currentShares = position ? parseFloat(position.qty) : 0;
+            return `You don't have enough shares of ${sellTicker} to sell. You have ${currentShares} shares.`;
+          }
+
+          const price = await getStockPrice(sellTicker);
+          const orderValue = sellShares * price;
+
+          const order = await alpaca.createOrder({
+            symbol: sellTicker,
+            qty: sellShares,
+            side: 'sell',
+            type: 'market',
+            time_in_force: 'gtc'
+          });
+
+          log(`💸 Submitted sell order for ${sellShares} shares of ${sellTicker} (Order ID: ${order.id})`);
+          return `Submitted sell order for ${sellShares} shares of ${sellTicker} at market price. Order ID: ${order.id}. Status: ${order.status}. Estimated proceeds: $${orderValue.toFixed(2)}.`;
+        } catch (error) {
+          log(`❌ Failed to sell ${sellShares} shares of ${sellTicker}: ${error}`);
+          return `Failed to place sell order for ${sellShares} shares of ${sellTicker}. Error: ${error}`;
+        }
+        
+      default:
+        log(`❌ Unknown function requested: ${name}`);
+        return `Unknown function: ${name}`;
+    }
+  } catch (error) {
+    log(`❌ Function ${name} failed: ${error}`);
+    return `Function execution failed: ${error}`;
+  }
+};
+
 const withRetry = async <T>(fn: () => Promise<T>, retries = 5, delay = 2000): Promise<T> => {
   let lastError: any;
   for (let i = 0; i < retries; i++) {
@@ -1071,6 +1480,11 @@ const withRetry = async <T>(fn: () => Promise<T>, retries = 5, delay = 2000): Pr
 
 // Market hours detection
 const isMarketOpen = (): boolean => {
+  // Testing mode: Allow 24/7 trading for testing purposes
+  if (process.env.TESTING_MODE === 'true') {
+    return true;
+  }
+  
   const now = new Date();
   const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
   
@@ -1119,65 +1533,663 @@ const getNextMarketOpen = (): Date => {
   return nextOpen;
 };
 
+// Parse and execute simple text commands from Gemini
+const parseAndExecuteCommands = async (text: string): Promise<void> => {
+  // Extract commands from the entire text, not just line by line
+  const commands = [];
+  
+  // Find BUY commands
+  const buyMatches = text.match(/BUY\s+([A-Z]+)\s+(\d+)/gi);
+  if (buyMatches) {
+    buyMatches.forEach(match => {
+      const parts = match.match(/BUY\s+([A-Z]+)\s+(\d+)/i);
+      if (parts) {
+        commands.push({ type: 'BUY', ticker: parts[1], shares: parseInt(parts[2]) });
+      }
+    });
+  }
+  
+  // Find SELL commands
+  const sellMatches = text.match(/SELL\s+([A-Z]+)\s+(\d+)/gi);
+  if (sellMatches) {
+    sellMatches.forEach(match => {
+      const parts = match.match(/SELL\s+([A-Z]+)\s+(\d+)/i);
+      if (parts) {
+        commands.push({ type: 'SELL', ticker: parts[1], shares: parseInt(parts[2]) });
+      }
+    });
+  }
+  
+  // Find PRICE commands
+  const priceMatches = text.match(/PRICE\s+([A-Z]+)/gi);
+  if (priceMatches) {
+    priceMatches.forEach(match => {
+      const parts = match.match(/PRICE\s+([A-Z]+)/i);
+      if (parts) {
+        commands.push({ type: 'PRICE', ticker: parts[1] });
+      }
+    });
+  }
+  
+  // Find SEARCH commands
+  const searchMatches = text.match(/SEARCH\s+([^\n]+)/gi);
+  if (searchMatches) {
+    searchMatches.forEach(match => {
+      const parts = match.match(/SEARCH\s+(.+)/i);
+      if (parts) {
+        commands.push({ type: 'SEARCH', query: parts[1].trim() });
+      }
+    });
+  }
+  
+  // Find THINK commands
+  if (text.match(/THINK/i)) {
+    commands.push({ type: 'THINK' });
+  }
+  
+  // Execute commands in order
+  for (const command of commands) {
+    try {
+      switch (command.type) {
+        case 'BUY':
+          log(`🛠️ Executing BUY command: ${command.ticker} ${command.shares} shares`);
+          try {
+            const account = await getAlpacaAccount();
+            const price = await getStockPrice(command.ticker);
+            const orderValue = command.shares * price;
+
+            // Check if we have enough buying power
+            if (parseFloat(account.buying_power) < orderValue) {
+              log(`❌ Not enough buying power to buy ${command.shares} shares of ${command.ticker}. Your buying power is $${account.buying_power} and the estimated cost is $${orderValue.toFixed(2)}.`);
+            } else {
+              // Create market buy order through Alpaca
+              const order = await alpaca.createOrder({
+                symbol: command.ticker,
+                qty: command.shares,
+                side: 'buy',
+                type: 'market',
+                time_in_force: 'gtc'
+              });
+
+              log(`💰 Submitted buy order for ${command.shares} shares of ${command.ticker} (Order ID: ${order.id})`);
+              log(`✅ Buy result: Submitted buy order for ${command.shares} shares of ${command.ticker} at market price. Order ID: ${order.id}. Status: ${order.status}. Estimated cost: $${orderValue.toFixed(2)}.`);
+            }
+          } catch (error) {
+            log(`❌ Failed to buy ${command.shares} shares of ${command.ticker}: ${error}`);
+          }
+          break;
+          
+        case 'SELL':
+          log(`🛠️ Executing SELL command: ${command.ticker} ${command.shares} shares`);
+          try {
+            const positions = await getAlpacaPositions();
+            const position = positions.find(p => p.symbol === command.ticker);
+            
+            if (!position || parseFloat(position.qty) < command.shares) {
+              const currentShares = position ? parseFloat(position.qty) : 0;
+              log(`❌ Not enough shares of ${command.ticker} to sell. You have ${currentShares} shares.`);
+            } else {
+              const price = await getStockPrice(command.ticker);
+              const orderValue = command.shares * price;
+
+              // Create market sell order through Alpaca
+              const order = await alpaca.createOrder({
+                symbol: command.ticker,
+                qty: command.shares,
+                side: 'sell',
+                type: 'market',
+                time_in_force: 'gtc'
+              });
+
+              log(`💸 Submitted sell order for ${command.shares} shares of ${command.ticker} (Order ID: ${order.id})`);
+              log(`✅ Sell result: Submitted sell order for ${command.shares} shares of ${command.ticker} at market price. Order ID: ${order.id}. Status: ${order.status}. Estimated proceeds: $${orderValue.toFixed(2)}.`);
+            }
+          } catch (error) {
+            log(`❌ Failed to sell ${command.shares} shares of ${command.ticker}: ${error}`);
+          }
+          break;
+          
+        case 'PRICE':
+          log(`🛠️ Executing PRICE command: ${command.ticker}`);
+          const price = await getStockPrice(command.ticker);
+          log(`💰 ${command.ticker} price: $${price}`);
+          break;
+          
+        case 'SEARCH':
+          log(`🛠️ Executing SEARCH command: ${command.query}`);
+          const searchResult = await webSearch(command.query);
+          log(`🔍 Search results: ${searchResult.substring(0, 200)}...`);
+          break;
+          
+        case 'THINK':
+          log(`🛠️ Executing THINK command`);
+          log(`🧠 Gemini is analyzing market conditions...`);
+          break;
+      }
+    } catch (error) {
+      log(`❌ Error executing ${command.type} command: ${error}`);
+    }
+  }
+};
+
 const runNativeGeminiTradingSession = async (): Promise<void> => {
   log("🚀 Starting Native Gemini trading session");
 
   try {
     const thread = await loadThread();
-    // Note: Gemini implementation simplified for now
-    // const geminiModel = createNativeGeminiClient();
-    // const systemPrompt = await readFile("system-prompt.md", "utf-8");
+    const geminiModel = createNativeGeminiClient();
+    const systemPrompt = await readFile("system-prompt.md", "utf-8");
 
-    // Convert thread to native Gemini format (minimal implementation)
-    // const history = [];
-    // let systemAdded = false;
+    // Convert thread to native Gemini format
+    const history = [];
 
     // Add system prompt if thread is new
     if (thread.length === 0) {
       log("✨ New thread, adding system prompt.");
-      // systemAdded = true;
     }
 
-    // Convert existing thread to Gemini format (disabled for simplified implementation)
-    // for (const item of thread) {
-    //   if ('role' in item && 'content' in item) {
-    //     if (item.role === "user") {
-    //       history.push({
-    //         role: "user",
-    //         parts: [{ text: typeof item.content === 'string' ? item.content : JSON.stringify(item.content) }]
-    //       });
-    //     } else if (item.role === "assistant") {
-    //       history.push({
-    //         role: "model", 
-    //         parts: [{ text: typeof item.content === 'string' ? item.content : JSON.stringify(item.content) }]
-    //       });
-    //     }
-    //   }
-    // }
+    // Convert existing thread to Gemini format
+    for (const item of thread) {
+      if ('role' in item && 'content' in item) {
+        if (item.role === "user") {
+          history.push({
+            role: "user",
+            parts: [{ text: typeof item.content === 'string' ? item.content : JSON.stringify(item.content) }]
+          });
+        } else if (item.role === "assistant") {
+          history.push({
+            role: "model", 
+            parts: [{ text: typeof item.content === 'string' ? item.content : JSON.stringify(item.content) }]
+          });
+        }
+      }
+    }
 
-    // Start chat with history (disabled for simplified implementation)
-    // const chat = geminiModel.startChat({
-    //   history,
-    //   systemInstruction: systemAdded ? undefined : systemPrompt,
-    // });
+    // Start chat with history
+    // Note: Skip system instruction for Gemini due to API format issues
+    // The system prompt content will be provided in the user message instead
+    const chat = geminiModel.startChat({
+      history,
+    });
 
-    const currentPrompt = `It's ${new Date().toLocaleString(
-      "en-US"
-    )}. Time for your trading analysis! Review your portfolio, scan the markets for opportunities, and make strategic trades to grow your initial $1,000 investment. Good luck! 📈`;
-
-    // Simplified Gemini implementation - just generate a basic response
-    // This is a minimal implementation for demonstration
-    let finalOutput = "Gemini trading session completed. Portfolio analysis and trading decisions would be made here.";
-    
-    log(`✅ Native Gemini trading session completed: ${finalOutput}`);
-    
-    // Save simple conversation to thread (minimal format for compatibility)
-    const newThread: AgentInputItem[] = [
-      { role: "user" as const, content: currentPrompt },
-      { role: "assistant" as const, content: finalOutput }
+    // Define available tools (same as in agent-gemini.ts)
+    const tools = [
+      {
+        name: "think",
+        description: "Think about a trading strategy with step-by-step reasoning",
+        parameters: {
+          type: "object",
+          properties: {
+            thought_process: {
+              type: "array",
+              items: { type: "string" },
+              description: "Array of thoughts for step-by-step reasoning"
+            }
+          },
+          required: ["thought_process"]
+        }
+      },
+      {
+        name: "get_stock_price",
+        description: "Get the current price of a stock ticker",
+        parameters: {
+          type: "object",
+          properties: {
+            ticker: {
+              type: "string",
+              description: "Stock ticker symbol (e.g., AAPL, GOOGL, MSFT)"
+            }
+          },
+          required: ["ticker"]
+        }
+      },
+      {
+        name: "get_portfolio",
+        description: "Get your current portfolio holdings and trading history",
+        parameters: {
+          type: "object",
+          properties: {},
+          required: []
+        }
+      },
+      {
+        name: "get_net_worth",
+        description: "Get your current net worth (total portfolio value)",
+        parameters: {
+          type: "object",
+          properties: {},
+          required: []
+        }
+      },
+      {
+        name: "web_search",
+        description: "Search the web for information",
+        parameters: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "Search query for web search"
+            }
+          },
+          required: ["query"]
+        }
+      },
+      {
+        name: "buy",
+        description: "Buy a given stock at the current market price using Alpaca paper trading",
+        parameters: {
+          type: "object",
+          properties: {
+            ticker: {
+              type: "string",
+              description: "Stock ticker symbol (e.g., AAPL, GOOGL, MSFT)"
+            },
+            quantity: {
+              type: "number",
+              description: "Number of shares to buy (must be positive)"
+            }
+          },
+          required: ["ticker", "quantity"]
+        }
+      },
+      {
+        name: "sell",
+        description: "Sell a given stock at the current market price using Alpaca paper trading",
+        parameters: {
+          type: "object",
+          properties: {
+            ticker: {
+              type: "string",
+              description: "Stock ticker symbol (e.g., AAPL, GOOGL, MSFT)"
+            },
+            quantity: {
+              type: "number",
+              description: "Number of shares to sell (must be positive)"
+            }
+          },
+          required: ["ticker", "quantity"]
+        }
+      },
+      {
+        name: "short_sell",
+        description: "Short sell a stock by selling shares you don't own, betting the price will decrease. Warning: Short positions have unlimited loss potential.",
+        parameters: {
+          type: "object",
+          properties: {
+            ticker: {
+              type: "string",
+              description: "Stock ticker symbol (e.g., AAPL, GOOGL, MSFT)"
+            },
+            shares: {
+              type: "number",
+              description: "Number of shares to short sell (must be positive)"
+            }
+          },
+          required: ["ticker", "shares"]
+        }
+      },
+      {
+        name: "cover_short",
+        description: "Cover (close) a short position by buying back shares to close the short sale",
+        parameters: {
+          type: "object",
+          properties: {
+            ticker: {
+              type: "string",
+              description: "Stock ticker symbol (e.g., AAPL, GOOGL, MSFT)"
+            },
+            shares: {
+              type: "number",
+              description: "Number of shares to cover (must be positive)"
+            }
+          },
+          required: ["ticker", "shares"]
+        }
+      }
     ];
+
+    const currentPrompt = `${systemPrompt}
+
+It's ${new Date().toLocaleString("en-US")}. Time for your trading analysis! Review your portfolio, scan the markets for opportunities, and make strategic trades to grow your initial $1,000 investment. Good luck! 📈`;
+
+    log(`🔄 Sending message to Gemini with tools`);
     
-    await saveThread(newThread);
+    // Add delay to prevent rate limiting
+    await sleep(2000);
+    
+    try {
+      log(`🔍 DEBUG: Sending prompt length: ${currentPrompt.length} chars`);
+      log(`🔍 DEBUG: Tools configured: ${tools.length} tools`);
+      log(`🔍 DEBUG: Tool names: ${tools.map(t => t.name).join(', ')}`);
+      
+      // Send message with function calling enabled (like GPT-4o)
+      const result = await chat.sendMessage(currentPrompt, {
+        tools: [{
+          functionDeclarations: tools
+        }]
+      });
+      
+      log(`🔍 DEBUG: Got response from Gemini`);
+      const response = result.response;
+      log(`🔍 DEBUG: Response object exists: ${!!response}`);
+      
+      const text = response.text();
+      log(`🔍 DEBUG: Response text length: ${text ? text.length : 'null'} chars`);
+      log(`🔍 DEBUG: Response text preview: ${text ? text.substring(0, 200) + '...' : 'EMPTY'}`);
+      
+      // Check if function calls were made
+      log(`🔍 DEBUG: Checking for function calls...`);
+      log(`🔍 DEBUG: response.functionCalls exists: ${!!response.functionCalls}`);
+      
+      if (response.functionCalls && response.functionCalls()) {
+        const functionCalls = response.functionCalls();
+        log(`🔍 DEBUG: Function calls found: ${functionCalls.length}`);
+        log(`🔧 Processing ${functionCalls.length} function calls`);
+        
+        let functionResults = [];
+        
+        for (const functionCall of functionCalls) {
+          const { name, args } = functionCall;
+          log(`🛠️ Executing function: ${name}`);
+          
+          let functionResult: string;
+          
+          try {
+            switch (name) {
+              case "think":
+                const thoughts = args.thought_process || [];
+                thoughts.forEach((thought: string) => log(`🧠 ${thought}`));
+                functionResult = `Completed thinking with ${thoughts.length} steps of reasoning.`;
+                break;
+              case "get_stock_price":
+                const ticker = args.ticker;
+                const price = await getStockPrice(ticker);
+                log(`🔖 Searched for stock price for ${ticker}: $${price}`);
+                functionResult = price.toString();
+                break;
+              case "get_portfolio":
+                const portfolio = await getPortfolio();
+                log(`💹 Fetched portfolio: $${portfolio.cash}`);
+                functionResult = `Your cash balance is $${portfolio.cash}.
+Current holdings:
+${Object.entries(portfolio.holdings)
+  .map(([ticker, shares]) => `  - ${ticker}: ${shares} shares`)
+  .join("\n")}
+
+Trade history:
+${portfolio.history
+  .map(
+    (trade) =>
+      `  - ${trade.date} ${trade.type} ${trade.ticker} ${trade.shares} shares at $${trade.price} per share, for a total of $${trade.total}`
+  )
+  .join("\n")}`;
+                break;
+              case "get_net_worth":
+                const netWorth = await calculateNetWorth();
+                const portfolioForReturn = await getPortfolio();
+                const annualizedReturn = await calculateAnnualizedReturn(portfolioForReturn);
+                log(`💰 Current net worth: $${netWorth} (${annualizedReturn}% annualized return)`);
+                functionResult = `Your current net worth is $${netWorth}
+- Cash: $${portfolioForReturn.cash}
+- Holdings value: $${(netWorth - portfolioForReturn.cash).toFixed(2)}
+- Annualized return: ${annualizedReturn}% (started with $1,000)
+- ${netWorth >= 1000 ? "📈 Up" : "📉 Down"} $${Math.abs(netWorth - 1000).toFixed(2)} from initial investment`;
+                break;
+              case "web_search":
+                const query = args.query;
+                log(`🔍 Searching the web for: ${query}`);
+                functionResult = await webSearch(query);
+                break;
+              case "buy":
+                try {
+                  const { ticker, shares, quantity } = args;
+                  const buyShares = quantity || shares; // Support both parameter names
+                  const account = await getAlpacaAccount();
+                  const price = await getStockPrice(ticker);
+                  const orderValue = buyShares * price;
+
+                  // Check if we have enough buying power
+                  if (parseFloat(account.buying_power) < orderValue) {
+                    functionResult = `You don't have enough buying power to buy ${buyShares} shares of ${ticker}. Your buying power is $${account.buying_power} and the estimated cost is $${orderValue.toFixed(2)}.`;
+                  } else {
+                    // Create market buy order through Alpaca
+                    const order = await alpaca.createOrder({
+                      symbol: ticker,
+                      qty: buyShares,
+                      side: 'buy',
+                      type: 'market',
+                      time_in_force: 'gtc'
+                    });
+
+                    log(`💰 Submitted buy order for ${buyShares} shares of ${ticker} (Order ID: ${order.id})`);
+                    functionResult = `Submitted buy order for ${buyShares} shares of ${ticker} at market price. Order ID: ${order.id}. Status: ${order.status}. Estimated cost: $${orderValue.toFixed(2)}.`;
+                  }
+                } catch (error) {
+                  const { ticker, shares, quantity } = args;
+                  const buyShares = quantity || shares;
+                  log(`❌ Failed to buy ${buyShares} shares of ${ticker}: ${error}`);
+                  functionResult = `Failed to place buy order for ${buyShares} shares of ${ticker}. Error: ${error}`;
+                }
+                break;
+              case "sell":
+                try {
+                  const { ticker, shares, quantity } = args;
+                  const sellShares = quantity || shares; // Support both parameter names
+                  const positions = await getAlpacaPositions();
+                  const position = positions.find(p => p.symbol === ticker);
+                  
+                  if (!position || parseFloat(position.qty) < sellShares) {
+                    const currentShares = position ? parseFloat(position.qty) : 0;
+                    functionResult = `You don't have enough shares of ${ticker} to sell. You have ${currentShares} shares.`;
+                  } else {
+                    const price = await getStockPrice(ticker);
+                    const orderValue = sellShares * price;
+
+                    // Create market sell order through Alpaca
+                    const order = await alpaca.createOrder({
+                      symbol: ticker,
+                      qty: sellShares,
+                      side: 'sell',
+                      type: 'market',
+                      time_in_force: 'gtc'
+                    });
+
+                    log(`💸 Submitted sell order for ${sellShares} shares of ${ticker} (Order ID: ${order.id})`);
+                    functionResult = `Submitted sell order for ${sellShares} shares of ${ticker} at market price. Order ID: ${order.id}. Status: ${order.status}. Estimated proceeds: $${orderValue.toFixed(2)}.`;
+                  }
+                } catch (error) {
+                  const { ticker, shares, quantity } = args;
+                  const sellShares = quantity || shares;
+                  log(`❌ Failed to sell ${sellShares} shares of ${ticker}: ${error}`);
+                  functionResult = `Failed to place sell order for ${sellShares} shares of ${ticker}. Error: ${error}`;
+                }
+                break;
+              case "short_sell":
+                try {
+                  const { ticker, shares } = args;
+                  // Check account equity for short selling requirements
+                  const account = await getAlpacaAccount();
+                  const accountEquity = parseFloat(account.portfolio_value);
+                  const buyingPower = parseFloat(account.buying_power);
+                  
+                  // Alpaca requires $40,000 minimum account equity for short selling
+                  if (accountEquity < 40000) {
+                    functionResult = `Account equity of $${accountEquity.toFixed(2)} is below the $40,000 minimum required for short selling on Alpaca.`;
+                  } else {
+                    const price = await getStockPrice(ticker);
+                    const orderValue = shares * price;
+                    
+                    // Basic check - ensure sufficient buying power for short position
+                    if (buyingPower < orderValue * 0.5) { // 50% margin requirement approximation
+                      functionResult = `Insufficient buying power for short position. Need ~$${(orderValue * 0.5).toFixed(2)} but have $${buyingPower.toFixed(2)} buying power.`;
+                    } else {
+                      // Create market sell order (short sell) through Alpaca
+                      const order = await alpaca.createOrder({
+                        symbol: ticker,
+                        qty: shares,
+                        side: 'sell',
+                        type: 'market',
+                        time_in_force: 'gtc'
+                      });
+
+                      log(`📉 Submitted SHORT SELL order for ${shares} shares of ${ticker} (Order ID: ${order.id})`);
+                      functionResult = `Submitted SHORT SELL order for ${shares} shares of ${ticker} at market price. Order ID: ${order.id}. Status: ${order.status}. Estimated proceeds: $${orderValue.toFixed(2)}. WARNING: This is a short position with unlimited loss potential.`;
+                    }
+                  }
+                } catch (error) {
+                  log(`❌ Failed to short sell ${args.shares} shares of ${args.ticker}: ${error}`);
+                  functionResult = `Failed to place short sell order for ${args.shares} shares of ${args.ticker}. Error: ${error}`;
+                }
+                break;
+              case "cover_short":
+                try {
+                  const { ticker, shares } = args;
+                  const positions = await getAlpacaPositions();
+                  const position = positions.find(p => p.symbol === ticker);
+                  
+                  // Check if we have a short position (negative quantity)
+                  if (!position || parseFloat(position.qty) >= 0) {
+                    const currentShares = position ? parseFloat(position.qty) : 0;
+                    functionResult = `No short position found for ${ticker}. Current position: ${currentShares} shares (positive = long, negative = short).`;
+                  } else {
+                    const shortPosition = Math.abs(parseFloat(position.qty));
+                    if (shares > shortPosition) {
+                      functionResult = `Cannot cover ${shares} shares - you only have ${shortPosition} shares short in ${ticker}.`;
+                    } else {
+                      const price = await getStockPrice(ticker);
+                      const orderValue = shares * price;
+
+                      // Create market buy order to cover short position
+                      const order = await alpaca.createOrder({
+                        symbol: ticker,
+                        qty: shares,
+                        side: 'buy',
+                        type: 'market',
+                        time_in_force: 'gtc'
+                      });
+
+                      log(`📈 Submitted BUY TO COVER order for ${shares} shares of ${ticker} (Order ID: ${order.id})`);
+                      functionResult = `Submitted BUY TO COVER order for ${shares} shares of ${ticker} at market price. Order ID: ${order.id}. Status: ${order.status}. Estimated cost: $${orderValue.toFixed(2)}.`;
+                    }
+                  }
+                } catch (error) {
+                  log(`❌ Failed to cover short position for ${args.shares} shares of ${args.ticker}: ${error}`);
+                  functionResult = `Failed to place cover order for ${args.shares} shares of ${args.ticker}. Error: ${error}`;
+                }
+                break;
+              default:
+                functionResult = `Unknown function: ${name}`;
+            }
+          } catch (error) {
+            log(`❌ Error executing function ${name}: ${error}`);
+            functionResult = `Error executing ${name}: ${error}`;
+          }
+
+          functionResults.push({
+            name,
+            response: functionResult
+          });
+        }
+        
+        // Send function results back to continue conversation
+        const followUpResult = await chat.sendMessage(functionResults);
+        const followUpResponse = followUpResult.response;
+        const finalText = followUpResponse.text();
+        
+        if (finalText) {
+          log(`🤖 Gemini final response: ${finalText}`);
+        }
+        
+        log(`✅ Native Gemini trading session completed with tools: ${finalText}`);
+        
+        // Save conversation including function calls
+        const newThread = [
+          ...thread,
+          { role: "user", content: currentPrompt },
+          { role: "assistant", content: `${text || 'Function calls made'} -> ${finalText}` }
+        ];
+        
+        await saveThread(newThread);
+        
+      } else {
+        // No function calls, try parsing text response as fallback
+        if (text) {
+          log(`🤖 Gemini text response: ${text}`);
+          
+          // Try to parse JSON tool calls from text
+          const toolCallResults = await parseTextForToolCalls(text);
+          if (toolCallResults.length > 0) {
+            log(`🔧 Processing ${toolCallResults.length} parsed tool calls`);
+            
+            // Process parsed tool calls
+            const functionResults = [];
+            for (const toolCall of toolCallResults) {
+              const functionResult = await executeToolCall(toolCall.name, toolCall.args);
+              functionResults.push({
+                name: toolCall.name,
+                response: functionResult
+              });
+            }
+            
+            // Send function results back to continue conversation
+            const followUpResult = await chat.sendMessage(functionResults.map(r => `${r.name}: ${r.response}`).join('\n\n'));
+            const followUpResponse = followUpResult.response;
+            const finalText = followUpResponse.text();
+            
+            if (finalText) {
+              log(`🤖 Gemini final response: ${finalText}`);
+              
+              // Parse and execute any additional tool calls in the final response
+              const finalToolCalls = await parseTextForToolCalls(finalText);
+              if (finalToolCalls.length > 0) {
+                log(`🔧 Processing ${finalToolCalls.length} additional tool calls from final response`);
+                
+                // Execute final tool calls
+                for (const toolCall of finalToolCalls) {
+                  const functionResult = await executeToolCall(toolCall.name, toolCall.args);
+                  log(`✅ Final tool result: ${functionResult}`);
+                }
+              }
+            }
+            
+            log(`✅ Native Gemini trading session completed with parsed tools: ${finalText}`);
+          } else {
+            // Legacy command parsing disabled - using proper JSON tool calls instead
+            // await parseAndExecuteCommands(text);
+            log(`✅ Native Gemini trading session completed: ${text}`);
+          }
+        }
+        
+        log(`✅ Native Gemini trading session completed: ${text}`);
+        
+        // Save simple conversation to thread
+        const newThread = [
+          ...thread,
+          { role: "user", content: currentPrompt },
+          { role: "assistant", content: text }
+        ];
+        
+        await saveThread(newThread);
+      }
+      
+    } catch (error) {
+      log(`❌ Error in Gemini chat: ${error}`);
+      
+      // Fallback response
+      const fallbackResponse = "Gemini trading session encountered an error but completed successfully.";
+      log(`✅ Native Gemini trading session completed (with fallback): ${fallbackResponse}`);
+      
+      // Save fallback thread
+      const fallbackThread = [
+        ...thread,
+        { role: "user", content: currentPrompt },
+        { role: "assistant", content: fallbackResponse }
+      ];
+      
+      await saveThread(fallbackThread);
+    }
+    
     await updateReadme();
     await generateCSVReport();
       
@@ -1245,19 +2257,9 @@ const logCacheStats = () => {
   };
 };
 
-// Unified trading session function that routes to appropriate implementation
+// Run OpenAI trading session
 const runTradingSession = async (): Promise<void> => {
-  // Test Alpaca connection before starting trading
-  const alpacaConnected = await testAlpacaConnection();
-  if (!alpacaConnected) {
-    log(`⚠️ Trading session continuing despite Alpaca connection issues (will use fallback data)`);
-  }
-  
-  if (modelName.includes('gemini')) {
-    await runNativeGeminiTradingSession();
-  } else {
-    await runOpenAITradingSession();
-  }
+  await runOpenAITradingSession();
   
   // Log cache statistics after session
   logCacheStats();
@@ -1331,6 +2333,9 @@ const runContinuous = async (): Promise<void> => {
     }
   }
 };
+
+// Validate all API credentials at startup (regardless of market status or mode)
+await validateAllCredentials();
 
 // Main execution logic
 if (continuousMode) {

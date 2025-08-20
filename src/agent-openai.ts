@@ -14,37 +14,9 @@ config();
 // Parse model first to help determine profile name
 const modelName = process.env.MODEL || "gpt-4o";
 
-// Get profile name for file isolation - auto-detect from model if not specified or conflicts
+// Get profile name for file isolation
 const getProfileName = (): string => {
-  // If PROFILE_NAME is explicitly set and matches the model type, use it
-  if (process.env.PROFILE_NAME) {
-    const profileName = process.env.PROFILE_NAME;
-    
-    // Check if profile name matches model type
-    const isValidMatch = 
-      (modelName.includes('gemini') && profileName === 'gemini') ||
-      (modelName.includes('gpt-4o') && profileName === 'gpt4o') ||
-      (modelName.includes('claude') && profileName === 'claude') ||
-      (profileName === 'default');
-    
-    if (isValidMatch) {
-      return profileName;
-    }
-    
-    // Profile doesn't match model, auto-detect instead
-    console.log(`⚠️  PROFILE_NAME=${profileName} doesn't match MODEL=${modelName}, auto-detecting...`);
-  }
-  
-  // Auto-detect profile from model name
-  if (modelName.includes('gemini')) {
-    return 'gemini';
-  } else if (modelName.includes('gpt-4o')) {
-    return 'gpt4o';
-  } else if (modelName.includes('claude')) {
-    return 'claude';
-  }
-  
-  return 'default';
+  return process.env.PROFILE_NAME || 'openai';
 };
 
 const profileName = getProfileName();
@@ -59,43 +31,15 @@ invariant(process.env.ALPACA_SECRET_KEY, "ALPACA_SECRET_KEY is not set");
 const CACHE_TTL_SECONDS = parseInt(process.env.CACHE_TTL_SECONDS || "3600"); // 1 hour default
 const ENABLE_EXPLICIT_CACHING = process.env.ENABLE_EXPLICIT_CACHING !== "false"; // Enabled by default
 
-// Validate API keys based on model choice
-if (modelName.includes('gemini')) {
-  invariant(process.env.GEMINI_API_KEY, "GEMINI_API_KEY is not set for Gemini model");
-}
+// OpenAI-specific setup only
 
-// Create unified client factory for OpenAI and Gemini support
+// Create OpenAI client
 const createAPIClient = (): OpenAI => {
-  if (modelName.includes('gemini')) {
-    // Use Google AI Studio endpoint for Gemini models
-    return new OpenAI({
-      apiKey: process.env.GEMINI_API_KEY!,
-      baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
-      defaultHeaders: {
-        'Content-Type': 'application/json',
-      },
-    });
-  } else {
-    // Default OpenAI client
-    return new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY!,
-    });
-  }
-};
-
-// Create native Gemini client
-const createNativeGeminiClient = () => {
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-  return genAI.getGenerativeModel({ 
-    model: "gemini-2.5-flash",
-    generationConfig: {
-      temperature: 0.7,
-      topK: 40,
-      topP: 0.95,
-      maxOutputTokens: 8192,
-    },
+  return new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY!,
   });
 };
+
 
 const client = createAPIClient();
 
@@ -114,7 +58,6 @@ const alpaca = new Alpaca({
 // Cache tracking for analytics
 let sessionCacheStats = {
   openaiCachedTokens: 0,
-  geminiCacheHits: 0,
   totalRequests: 0
 };
 
@@ -134,9 +77,6 @@ const log = (message: string) => {
   }
 };
 
-// Cache management for Gemini
-let geminiCacheId: string | null = null;
-let geminiCacheExpiry: Date | null = null;
 
 const portfolioSchema = z.object({
   cash: z.number(),
@@ -208,13 +148,6 @@ const getAlpacaPositions = async () => {
   }
 };
 
-// Helper function to create/manage Gemini cache
-const getOrCreateGeminiCache = async (systemPrompt: string): Promise<string | null> => {
-  // Disable explicit caching for now - Gemini 2.5 has automatic implicit caching
-  // that provides 75% cost savings automatically
-  log(`💡 Gemini explicit caching disabled, using automatic implicit caching (75% savings)`);
-  return null;
-};
 
 // Helper function to get recent orders as trading history
 const getAlpacaOrderHistory = async (limit = 50) => {
@@ -316,30 +249,11 @@ const getStockPrice = async (ticker: string): Promise<number> => {
       log(`⚠️ Yahoo Finance API failed for ${ticker}: ${yahooError}`);
     }
 
-    // Use realistic mock prices based on recent market data
-    const mockPrices: Record<string, number> = {
-      'AAPL': 224.50,
-      'GOOGL': 175.20,
-      'MSFT': 419.70,
-      'TSLA': 246.80,
-      'NVDA': 126.50,
-      'XLI': 135.40,
-      'HEI': 225.30,
-      'RCL': 160.25,
-      'NIO': 4.25,
-      'XLP': 80.15,
-      'XLV': 135.60,
-      'XLY': 190.25,
-      'XLF': 42.80,
-      'SPY': 550.20
-    };
-    
-    const fallbackPrice = mockPrices[ticker.toUpperCase()] || (50 + Math.random() * 200);
-    log(`⚠️ Using realistic fallback price for ${ticker}: $${fallbackPrice.toFixed(2)}`);
-    return Math.round(fallbackPrice * 100) / 100;
+    // If both data sources fail, throw an error instead of using mock data
+    throw new Error(`Unable to fetch price for ${ticker} from any data source`);
   } catch (error) {
     log(`❌ Failed to get stock price for ${ticker}: ${error}`);
-    return Math.round((50 + Math.random() * 200) * 100) / 100;
+    throw error;
   }
 };
 
@@ -623,7 +537,7 @@ const webSearchTool = tool({
   parameters: z.object({
     query: z.string(),
   }),
-  async execute({ query }) {
+  async execute({ query }: { query: string }) {
     log(`🔍 Searching the web for: ${query}`);
     const result = await webSearch(query);
     return result;
@@ -636,8 +550,8 @@ const thinkTool = tool({
   parameters: z.object({
     thought_process: z.array(z.string()),
   }),
-  async execute({ thought_process }) {
-    thought_process.forEach((thought) => log(`🧠 ${thought}`));
+  async execute({ thought_process }: { thought_process: string[] }) {
+    thought_process.forEach((thought: string) => log(`🧠 ${thought}`));
     return `Completed thinking with ${thought_process.length} steps of reasoning.`;
   },
 });
@@ -982,8 +896,8 @@ const generateCSVReport = async () => {
         }
       }
       
-      const cacheEnabled = modelName.includes('gemini') ? ENABLE_EXPLICIT_CACHING : 'auto';
-      const cacheTTL = modelName.includes('gemini') ? CACHE_TTL_SECONDS : 'auto';
+      const cacheEnabled = 'auto'; // OpenAI automatic caching
+      const cacheTTL = 'auto'; // OpenAI automatic cache management
       return `${trade.date},${trade.type},${trade.ticker},${trade.shares},${trade.price},${trade.total},${modelName},"${pnl}","${pnlPercent}",${cacheEnabled},${cacheTTL}`;
     });
     
@@ -995,66 +909,34 @@ const generateCSVReport = async () => {
   }
 };
 
-// Normalize model name for API calls based on actual availability
-function normalizeModelName(modelName: string): string {
-  // Gemini models available via Google AI Studio OpenAI-compatible endpoint
-  if (modelName.includes('gemini-2.5-pro')) {
-    return 'gemini-2.5-pro';
-  } else if (modelName.includes('gemini-2.5-flash')) {
-    return 'gemini-2.5-flash';
-  } else if (modelName.includes('gemini-2.0-flash')) {
-    return 'gemini-2.0-flash';
-  } else if (modelName.includes('gemini-1.5-flash')) {
-    return 'gemini-1.5-flash';
-  } else if (modelName.includes('gemini-1.5')) {
-    return 'gemini-1.5-pro';
-  } else if (modelName.includes('gemini')) {
-    return 'gemini-2.5-flash'; // Default to Gemini 2.5 Flash
-  }
-  return modelName; // Return as-is for OpenAI models
-}
+// Use the model name directly for OpenAI models
+const normalizeModelName = (modelName: string): string => modelName;
 
 const normalizedModel = normalizeModelName(modelName);
 
 // Log which model and client are being used
-log(`🤖 Using model: ${modelName} (normalized: ${normalizedModel})`);
-if (modelName.includes('gemini')) {
-  log(`🔗 Using Google AI Studio endpoint for Gemini models`);
-} else {
-  log(`🔗 Using OpenAI API`);
-}
+log(`🤖 Using OpenAI model: ${modelName}`);
+log(`🔗 Using OpenAI API`);
 
-// Create agent configuration (only for OpenAI models)
-let agent: Agent | null = null;
+// Create OpenAI agent configuration
+const agent = new Agent({
+  name: "Assistant",
+  model: normalizedModel,
+  instructions: await readFile("system-prompt.md", "utf-8"),
+  tools: [
+    thinkTool,
+    webSearchTool,
+    buyTool,
+    sellTool,
+    shortSellTool,
+    coverShortTool,
+    getStockPriceTool,
+    getPortfolioTool,
+    getNetWorthTool,
+  ],
+});
 
-if (!modelName.includes('gemini')) {
-  const agentConfig: any = {
-    name: "Assistant",
-    model: normalizedModel,
-    instructions: await readFile("system-prompt.md", "utf-8"),
-    tools: [
-      thinkTool,
-      webSearchTool,
-      buyTool,
-      sellTool,
-      shortSellTool,
-      coverShortTool,
-      getStockPriceTool,
-      getPortfolioTool,
-      getNetWorthTool,
-    ],
-  };
-  
-  // Only add custom client for non-OpenAI models (shouldn't happen since we filtered out Gemini)
-  if (!modelName.startsWith('gpt-')) {
-    agentConfig.client = client;
-  }
-  
-  agent = new Agent(agentConfig);
-  log(`🤖 Created OpenAI Agent with model: ${normalizedModel}`);
-} else {
-  log(`🤖 Using custom Gemini implementation with model: ${normalizedModel}`);
-}
+log(`🤖 Created OpenAI Agent with model: ${normalizedModel}`);
 
 // Parse command line arguments
 const args = process.argv.slice(2);
@@ -1102,6 +984,11 @@ const withRetry = async <T>(fn: () => Promise<T>, retries = 5, delay = 2000): Pr
 
 // Market hours detection
 const isMarketOpen = (): boolean => {
+  // Testing mode: Allow 24/7 trading for testing purposes
+  if (process.env.TESTING_MODE === 'true') {
+    return true;
+  }
+  
   const now = new Date();
   const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
   
@@ -1150,486 +1037,15 @@ const getNextMarketOpen = (): Date => {
   return nextOpen;
 };
 
-const runNativeGeminiTradingSession = async (): Promise<void> => {
-  log("🚀 Starting Native Gemini trading session");
 
-  try {
-    const thread = await loadThread();
-    const geminiModel = createNativeGeminiClient();
-    const systemPrompt = await readFile("system-prompt.md", "utf-8");
 
-    // Convert thread to native Gemini format
-    const history = [];
-    let systemAdded = false;
-
-    // Add system prompt if thread is new
-    if (thread.length === 0) {
-      log("✨ New thread, adding system prompt.");
-      systemAdded = true;
-    }
-
-    // Convert existing thread to Gemini format
-    for (const item of thread) {
-      if (item.role === "user") {
-        history.push({
-          role: "user",
-          parts: [{ text: typeof item.content === 'string' ? item.content : JSON.stringify(item.content) }]
-        });
-      } else if (item.role === "assistant") {
-        history.push({
-          role: "model", 
-          parts: [{ text: typeof item.content === 'string' ? item.content : JSON.stringify(item.content) }]
-        });
-      }
-    }
-
-    // Start chat with history
-    const chat = geminiModel.startChat({
-      history,
-      systemInstruction: systemAdded ? undefined : systemPrompt,
-    });
-
-    const currentPrompt = `It's ${new Date().toLocaleString(
-      "en-US"
-    )}. Time for your trading analysis! Review your portfolio, scan the markets for opportunities, and make strategic trades to grow your initial $1,000 investment. Good luck! 📈`;
-
-    // Define available functions
-    const availableFunctions = {
-      think: (args: any) => {
-        const thoughts = Array.isArray(args.thought_process) ? args.thought_process : [args.thought_process];
-        thoughts.forEach((thought: string) => log(`🧠 ${thought}`));
-        return "Completed thinking with " + thoughts.length + " steps of reasoning.";
-      },
-      get_portfolio: async () => {
-        return await getPortfolioTool();
-      }, 
-      get_net_worth: async () => {
-        return await getNetWorthTool();
-      },
-      get_stock_price: async (args: any) => {
-        return await getStockPrice(args.ticker);
-      },
-      buy: async (args: any) => {
-        return await buyTool(args);
-      },
-      sell: async (args: any) => {
-        return await sellTool(args);
-      },
-      web_search: async (args: any) => {
-        return await webSearchTool(args);
-      }
-    };
-
-    // Simplified trading session with rate limiting
-    let turnCount = 0;
-    const maxTurns = 6; // Strict limit to prevent rate limiting
-    let finalOutput = "";
-
-    log(`🔄 Native Gemini turn ${turnCount + 1}/${maxTurns}`);
-    
-    try {
-      // Send message and handle response
-      const result = await chat.sendMessage(currentPrompt);
-      const response = result.response;
-      const text = response.text();
-      
-      if (text) {
-        log(`🤖 Gemini response: ${text}`);
-        finalOutput = text;
-      }
-      
-      log(`✅ Native Gemini trading session completed: ${finalOutput}`);
-      
-      // Save simple conversation to thread (simplified format)
-      const newThread = [
-        { role: "user", content: currentPrompt },
-        { role: "assistant", content: finalOutput }
-      ];
-      
-      await saveThread(newThread);
-      await updateReadme();
-      await generateCSVReport();
-      
-    } catch (error) {
-      log(`❌ Native Gemini session failed: ${error}`);
-      throw error;
-    }
-  } catch (error) {
-    log(`❌ Native Gemini trading session failed: ${error}`);
-    throw error;
-  }
-};
-// Old Gemini implementation removed
-
-// Original OpenAI agent runner using the Agents SDK
-          description: "Think about a given topic",
-          parameters: {
-            type: "object",
-            properties: {
-              thought_process: {
-                type: "array",
-                items: { type: "string" },
-                description: "Array of thoughts"
-              }
-            },
-            required: ["thought_process"]
-          }
-        }
-      },
-      {
-        type: "function" as const,
-        function: {
-          name: "web_search",
-          description: "Search the web for information",
-          parameters: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Search query" }
-            },
-            required: ["query"]
-          }
-        }
-      },
-      {
-        type: "function" as const,
-        function: {
-          name: "get_portfolio",
-          description: "Get your portfolio",
-          parameters: { type: "object", properties: {} }
-        }
-      },
-      {
-        type: "function" as const,
-        function: {
-          name: "get_net_worth",
-          description: "Get your current net worth (total portfolio value)",
-          parameters: { type: "object", properties: {} }
-        }
-      },
-      {
-        type: "function" as const,
-        function: {
-          name: "get_stock_price",
-          description: "Get the current price of a given stock ticker",
-          parameters: {
-            type: "object",
-            properties: {
-              ticker: { type: "string", description: "Stock ticker symbol" }
-            },
-            required: ["ticker"]
-          }
-        }
-      },
-      {
-        type: "function" as const,
-        function: {
-          name: "buy",
-          description: "Buy a given stock at the current market price using Alpaca paper trading",
-          parameters: {
-            type: "object",
-            properties: {
-              ticker: { type: "string" },
-              shares: { type: "number" }
-            },
-            required: ["ticker", "shares"]
-          }
-        }
-      },
-      {
-        type: "function" as const,
-        function: {
-          name: "sell",
-          description: "Sell a given stock at the current market price using Alpaca paper trading",
-          parameters: {
-            type: "object",
-            properties: {
-              ticker: { type: "string" },
-              shares: { type: "number" }
-            },
-            required: ["ticker", "shares"]
-          }
-        }
-      },
-      {
-        type: "function" as const,
-        function: {
-          name: "short_sell",
-          description: "Short sell a stock by selling shares you don't own, betting the price will decrease",
-          parameters: {
-            type: "object",
-            properties: {
-              ticker: { type: "string" },
-              shares: { type: "number" }
-            },
-            required: ["ticker", "shares"]
-          }
-        }
-      },
-      {
-        type: "function" as const,
-        function: {
-          name: "cover_short",
-          description: "Cover (close) a short position by buying back shares to close the short sale",
-          parameters: {
-            type: "object",
-            properties: {
-              ticker: { type: "string" },
-              shares: { type: "number" }
-            },
-            required: ["ticker", "shares"]
-          }
-        }
-      }
-    ];
-
-    let finalOutput = "";
-    let maxTurns = 100;
-
-    for (let turn = 0; turn < maxTurns; turn++) {
-      log(`🔄 Gemini turn ${turn + 1}/${maxTurns}`);
-
-      // Debug logging for troubleshooting
-      log(`📊 Request details - Model: ${normalizedModel}, Messages: ${messages.length}, Tools: ${tools.length}`);
-      log(`🔍 Last message content length: ${messages[messages.length - 1]?.content?.length || 0}`);
-
-      let response;
-      try {
-        response = await geminiClient.chat.completions.create({
-          model: normalizedModel,
-          messages: messages,
-          tools: tools,
-          tool_choice: "auto"
-        });
-      } catch (error: any) {
-        // Only retry on network errors (ECONNRESET, ETIMEDOUT), not server errors (500)
-        const isNetworkError = error.code === 'ECONNRESET' || 
-                               error.code === 'ETIMEDOUT' || 
-                               error.code === 'ENOTFOUND' ||
-                               error.message?.includes('network') ||
-                               error.message?.includes('timeout');
-        
-        if (isNetworkError) {
-          log(`🔄 Network error detected, retrying once: ${error.message}`);
-          await sleep(2000); // Brief pause before retry
-          response = await geminiClient.chat.completions.create({
-            model: normalizedModel,
-            messages: messages,
-            tools: tools,
-            tool_choice: "auto"
-          });
-        } else {
-          throw error; // Don't retry server errors (500) - let them fail fast
-        }
-      }
-
-      // Track request for analytics
-      sessionCacheStats.totalRequests++;
-      
-      // Add small delay between API calls to reduce server load
-      await sleep(500);
-
-      // Log usage information if available (Gemini 2.5 implicit caching)
-      if (response.usage && (response.usage as any).cached_tokens) {
-        const cachedTokens = (response.usage as any).cached_tokens;
-        log(`💰 Gemini implicit cache hit: ${cachedTokens} cached tokens`);
-        sessionCacheStats.geminiCacheHits++;
-      }
-
-      const message = response.choices[0].message;
-
-      // Log Gemini's reasoning and decisions
-      if (message.content && message.content.trim()) {
-        log(`🤖 Gemini analysis: ${message.content}`);
-        finalOutput = message.content;
-      }
-
-      // Add assistant message to conversation
-      messages.push(message);
-
-      // Handle tool calls
-      if (message.tool_calls && message.tool_calls.length > 0) {
-        log(`🔧 Processing ${message.tool_calls.length} tool calls`);
-
-        const toolResults: AgentInputItem[] = [];
-        for (const toolCall of message.tool_calls) {
-          const toolName = toolCall.function.name;
-          const toolArgs = JSON.parse(toolCall.function.arguments);
-
-          log(`🛠️ Executing tool: ${toolName}`);
-
-          let toolResult: string;
-
-          try {
-            switch (toolName) {
-              case "think":
-                toolArgs.thought_process.forEach((thought: string) => log(`🧠 ${thought}`));
-                toolResult = `Completed thinking with ${toolArgs.thought_process.length} steps of reasoning.`;
-                break;
-              case "web_search":
-                log(`🔍 Searching the web for: ${toolArgs.query}`);
-                toolResult = await webSearch(toolArgs.query);
-                break;
-              case "get_portfolio":
-                const portfolio = await getPortfolio();
-                log(`💹 Fetched portfolio: ${portfolio.cash}`);
-                toolResult = `Your cash balance is ${portfolio.cash}.\nCurrent holdings:\n${Object.entries(portfolio.holdings)
-                  .map(([ticker, shares]) => `  - ${ticker}: ${shares} shares`)
-                  .join("\n")}\n\nTrade history:\n${portfolio.history
-                  .map(
-                    (trade) =>
-                      `  - ${trade.date} ${trade.type} ${trade.ticker} ${trade.shares} shares at ${trade.price} per share, for a total of ${trade.total}`
-                  )
-                  .join("\n")}`;
-                break;
-              case "get_net_worth":
-                const netWorth = await calculateNetWorth();
-                const portfolioForNetWorth = await getPortfolio();
-                const annualizedReturn = await calculateAnnualizedReturn(portfolioForNetWorth);
-                log(`💰 Current net worth: ${netWorth} (${annualizedReturn}% annualized return)`);
-                toolResult = `Your current net worth is ${netWorth}\n- Cash: ${portfolioForNetWorth.cash}\n- Holdings value: ${(netWorth - portfolioForNetWorth.cash).toFixed(2)}\n- Annualized return: ${annualizedReturn}% (started with $1,000)\n- ${netWorth >= 1000 ? "📈 Up" : "📉 Down"} ${Math.abs(netWorth - 1000).toFixed(2)} from initial investment`;
-                break;
-              case "get_stock_price":
-                const price = await getStockPrice(toolArgs.ticker);
-                log(`🔖 Searched for stock price for ${toolArgs.ticker}: ${price}`);
-                toolResult = price.toString();
-                break;
-              case "buy":
-                  const account = await getAlpacaAccount();
-                  const buyPrice = await getStockPrice(toolArgs.ticker);
-                  const orderValue = toolArgs.shares * buyPrice;
-                  if (parseFloat(account.buying_power) < orderValue) {
-                    toolResult = `You don't have enough buying power to buy ${toolArgs.shares} shares of ${toolArgs.ticker}. Your buying power is ${account.buying_power} and the estimated cost is ${orderValue.toFixed(2)}.`;
-                  } else {
-                    const order = await alpaca.createOrder({
-                      symbol: toolArgs.ticker,
-                      qty: toolArgs.shares,
-                      side: 'buy',
-                      type: 'market',
-                      time_in_force: 'gtc'
-                    });
-                    log(`💰 Submitted buy order for ${toolArgs.shares} shares of ${toolArgs.ticker} (Order ID: ${order.id})`);
-                    toolResult = `Submitted buy order for ${toolArgs.shares} shares of ${toolArgs.ticker} at market price. Order ID: ${order.id}. Status: ${order.status}. Estimated cost: ${orderValue.toFixed(2)}.`;
-                  }
-                break;
-              case "sell":
-                  const positions = await getAlpacaPositions();
-                  const position = positions.find(p => p.symbol === toolArgs.ticker);
-                  if (!position || parseFloat(position.qty) < toolArgs.shares) {
-                    const currentShares = position ? parseFloat(position.qty) : 0;
-                    toolResult = `You don't have enough shares of ${toolArgs.ticker} to sell. You have ${currentShares} shares.`;
-                  } else {
-                    const sellPrice = await getStockPrice(toolArgs.ticker);
-                    const sellOrderValue = toolArgs.shares * sellPrice;
-                    const order = await alpaca.createOrder({
-                      symbol: toolArgs.ticker,
-                      qty: toolArgs.shares,
-                      side: 'sell',
-                      type: 'market',
-                      time_in_force: 'gtc'
-                    });
-                    log(`💸 Submitted sell order for ${toolArgs.shares} shares of ${toolArgs.ticker} (Order ID: ${order.id})`);
-                    toolResult = `Submitted sell order for ${toolArgs.shares} shares of ${toolArgs.ticker} at market price. Order ID: ${order.id}. Status: ${order.status}. Estimated proceeds: ${sellOrderValue.toFixed(2)}.`;
-                  }
-                break;
-              case "short_sell":
-                  const shortAccount = await getAlpacaAccount();
-                  const accountEquity = parseFloat(shortAccount.portfolio_value);
-                  const buyingPower = parseFloat(shortAccount.buying_power);
-                  if (accountEquity < 40000) {
-                    toolResult = `Account equity of ${accountEquity.toFixed(2)} is below the $40,000 minimum required for short selling on Alpaca.`;
-                  } else {
-                    const shortPrice = await getStockPrice(toolArgs.ticker);
-                    const shortOrderValue = toolArgs.shares * shortPrice;
-                    if (buyingPower < shortOrderValue * 0.5) {
-                      toolResult = `Insufficient buying power for short position. Need ~${(shortOrderValue * 0.5).toFixed(2)} but have ${buyingPower.toFixed(2)} buying power.`;
-                    } else {
-                      const order = await alpaca.createOrder({
-                        symbol: toolArgs.ticker,
-                        qty: toolArgs.shares,
-                        side: 'sell',
-                        type: 'market',
-                        time_in_force: 'gtc'
-                      });
-                      log(`📉 Submitted SHORT SELL order for ${toolArgs.shares} shares of ${toolArgs.ticker} (Order ID: ${order.id})`);
-                      toolResult = `Submitted SHORT SELL order for ${toolArgs.shares} shares of ${toolArgs.ticker} at market price. Order ID: ${order.id}. Status: ${order.status}. Estimated proceeds: ${shortOrderValue.toFixed(2)}. WARNING: This is a short position with unlimited loss potential.`;
-                    }
-                  }
-                break;
-              case "cover_short":
-                  const coverPositions = await getAlpacaPositions();
-                  const coverPosition = coverPositions.find(p => p.symbol === toolArgs.ticker);
-                  if (!coverPosition || parseFloat(coverPosition.qty) >= 0) {
-                    const currentShares = coverPosition ? parseFloat(coverPosition.qty) : 0;
-                    toolResult = `No short position found for ${toolArgs.ticker}. Current position: ${currentShares} shares (positive = long, negative = short).`;
-                  } else {
-                    const shortPosition = Math.abs(parseFloat(coverPosition.qty));
-                    if (toolArgs.shares > shortPosition) {
-                      toolResult = `Cannot cover ${toolArgs.shares} shares - you only have ${shortPosition} shares short in ${toolArgs.ticker}.`;
-                    }
-                    else {
-                      const coverPrice = await getStockPrice(toolArgs.ticker);
-                      const coverOrderValue = toolArgs.shares * coverPrice;
-                      const order = await alpaca.createOrder({
-                        symbol: toolArgs.ticker,
-                        qty: toolArgs.shares,
-                        side: 'buy',
-                        type: 'market',
-                        time_in_force: 'gtc'
-                      });
-                      log(`📈 Submitted BUY TO COVER order for ${toolArgs.shares} shares of ${toolArgs.ticker} (Order ID: ${order.id})`);
-                      toolResult = `Submitted BUY TO COVER order for ${toolArgs.shares} shares of ${toolArgs.ticker} at market price. Order ID: ${order.id}. Status: ${order.status}. Estimated cost: ${coverOrderValue.toFixed(2)}.`;
-                    }
-                  }
-                break;
-              default:
-                toolResult = `Unknown tool: ${toolName}`;
-                log(`❌ Unknown tool requested: ${toolName}`);
-            }
-            log(`✅ Tool ${toolName} executed successfully`);
-          } catch (error) {
-            const errorMessage = `Tool execution failed: ${error}`;
-            toolResult = errorMessage;
-            log(`❌ Tool ${toolName} failed: ${error}`);
-          }
-
-          toolResults.push({
-            role: "tool" as const,
-            tool_call_id: toolCall.id,
-            content: toolResult,
-          });
-        }
-
-        messages.push(...toolResults);
-
-        // After processing tool calls, continue to the next turn
-        continue;
-      } else {
-        // No tool calls, conversation is complete
-        log(`✅ Gemini trading session completed: ${finalOutput}`);
-        break;
-      }
-    }
-
-    await saveThread(messages);
-    await updateReadme();
-    await generateCSVReport();
-
-  } catch (error) {
-    log(`❌ Gemini trading session failed: ${error}`);
-    throw error;
-  }
-};
-
-// Original OpenAI agent runner using the Agents SDK
+// OpenAI agent runner using the Agents SDK
 const runOpenAITradingSession = async (): Promise<void> => {
   log("🚀 Starting OpenAI trading session");
   
-  if (!agent) {
-    throw new Error('OpenAI Agent not initialized');
-  }
-  
   try {
     const thread = await loadThread();
+    const currentNetWorth = await calculateNetWorth();
     const result = await withRetry(async () => {
       return await run(
         agent,
@@ -1637,7 +1053,7 @@ const runOpenAITradingSession = async (): Promise<void> => {
           role: "user",
           content: `It's ${new Date().toLocaleString(
             "en-US"
-          )}. Time for your trading analysis! Review your portfolio, scan the markets for opportunities, and make strategic trades to grow your initial $1,000 investment. Good luck! 📈`,
+          )}. Time for your trading analysis! Review your portfolio, scan the markets for opportunities, and make strategic trades to grow your $${currentNetWorth.toLocaleString()} portfolio. Good luck! 📈`,
         }),
         { maxTurns: 100 }
       );
@@ -1646,7 +1062,6 @@ const runOpenAITradingSession = async (): Promise<void> => {
     log(`✅ OpenAI trading session completed: ${result.finalOutput}`);
     
     await saveThread(result.history);
-    await updateReadme();
     await generateCSVReport();
     
   } catch (error) {
@@ -1657,28 +1072,19 @@ const runOpenAITradingSession = async (): Promise<void> => {
 
 // Log cache statistics for the session
 const logCacheStats = () => {
-  if (modelName.includes('gemini')) {
-    log(`📊 Gemini cache stats - Explicit cache hits: ${sessionCacheStats.geminiCacheHits}, Total requests: ${sessionCacheStats.totalRequests}`);
-    if (sessionCacheStats.geminiCacheHits > 0) {
-      const hitRate = ((sessionCacheStats.geminiCacheHits / sessionCacheStats.totalRequests) * 100).toFixed(1);
-      log(`💰 Gemini cache hit rate: ${hitRate}% (estimated 75% cost savings on cached tokens)`);
-    }
-  } else {
-    log(`📊 OpenAI automatic caching active - Check response logs for cached_tokens information`);
-    if (sessionCacheStats.openaiCachedTokens > 0) {
-      log(`💰 OpenAI cached tokens this session: ${sessionCacheStats.openaiCachedTokens} (50% cost savings)`);
-    }
+  log(`📊 OpenAI automatic caching active - Check response logs for cached_tokens information`);
+  if (sessionCacheStats.openaiCachedTokens > 0) {
+    log(`💰 OpenAI cached tokens this session: ${sessionCacheStats.openaiCachedTokens} (50% cost savings)`);
   }
   
   // Reset stats for next session
   sessionCacheStats = {
     openaiCachedTokens: 0,
-    geminiCacheHits: 0,
     totalRequests: 0
   };
 };
 
-// Unified trading session function that routes to appropriate implementation
+// OpenAI trading session runner
 const runTradingSession = async (): Promise<void> => {
   // Test Alpaca connection before starting trading
   const alpacaConnected = await testAlpacaConnection();
@@ -1686,11 +1092,7 @@ const runTradingSession = async (): Promise<void> => {
     log(`⚠️ Trading session continuing despite Alpaca connection issues (will use fallback data)`);
   }
   
-  if (modelName.includes('gemini')) {
-    await runNativeGeminiTradingSession();
-  } else {
-    await runOpenAITradingSession();
-  }
+  await runOpenAITradingSession();
   
   // Log cache statistics after session
   logCacheStats();

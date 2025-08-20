@@ -33,7 +33,6 @@
   "homepage": "https://github.com/AnandChowdhary/priced-in#readme",
   "dependencies": {
     "@alpacahq/alpaca-trade-api": "^3.1.3",
-    "@google/generative-ai": "^0.24.1",
     "@openai/agents": "^0.0.9",
     "dotenv": "^17.2.1",
     "litellm": "^0.12.0",

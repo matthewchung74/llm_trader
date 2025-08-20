@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an autonomous AI-powered stock trading agent built with OpenAI's Agents framework. The agent executes trades automatically via GitHub Actions, starting with $1,000 and attempting to grow the portfolio through strategic trading decisions.
+This is an autonomous AI-powered stock trading agent built with OpenAI's Agents framework. The agent executes trades automatically using Alpaca's paper trading API, starting with $100,000 virtual capital and attempting to grow the portfolio through strategic trading decisions.
 
 ## Key Commands
 
@@ -17,94 +17,75 @@ This is an autonomous AI-powered stock trading agent built with OpenAI's Agents 
 - `tsx src/agent.ts` - Direct execution of the agent (single session)
 - `tsx src/agent.ts --continuous --interval=2` - Run continuously every 2 hours
 
-### Testing
-- `npm test` - Run all tests
-- `npm run test:agents` - Test agent functionality for GPT-4o and Gemini
-- `npm run test:agents:verbose` - Run agent tests with verbose output
-- `npm run test:watch` - Run tests in watch mode
-- `npm run test:coverage` - Run tests with coverage report
-- `npm run test:ci` - Run tests for CI environment
-
-### Model Selection
-The agent supports flexible AI model selection via environment variables:
-
-**OpenAI Models:**
-- `MODEL=gpt-4o npm start` - GPT-4o (default, highest quality)
-- `MODEL=gpt-4o-mini npm start` - GPT-4o-mini (faster, cheaper)
-- `MODEL=gpt-4.1 npm start` - GPT-4.1 (if available)
-
-**Gemini Models (experimental):**
-- `MODEL=gemini-2.0-flash npm start` - Google Gemini 2.0 Flash
-- `MODEL=gemini-2.5-pro npm start` - Google Gemini 2.5 Pro (requires GEMINI_API_KEY)
-
-**Claude Models (experimental):**
-- `MODEL=claude-3-5-sonnet npm start` - Anthropic Claude 3.5 Sonnet (requires ANTHROPIC_API_KEY)
-
-**Examples:**
+### 🚨 Important: Running with Profile Environment Files
+**RECOMMENDED APPROACH:** Use `npx dotenv -e .env.profilename` to load all API keys:
 ```bash
-# Use cheaper OpenAI model for cost savings
-MODEL=gpt-4o-mini npm run start:continuous
+# Correct way - loads all API keys from .env.gpt5
+npx dotenv -e .env.gpt5 -- npm run start:continuous
+```
+The dotenv approach is required because API keys are stored in the profile-specific .env files.
 
-# Test single session with Gemini
-MODEL=gemini-2.0-flash npm start
+### Testing
+- `npm test` - Run all tests with Jest framework
+- `npm run test:watch` - Watch mode for development
+- `npm run test:coverage` - Generate coverage reports
+- See **Testing Framework** section below for comprehensive details
 
-# Run continuous with default model
-npm run start:continuous
+### Supported AI Models
+**GPT-5** (OpenAI's latest flagship model, August 2025)
+- Best performance for trading decisions
+- Enhanced reasoning and market analysis
+- Configured in `.env.gpt5`
+
+**How to Run Trading Agents:**
+```bash
+# GPT-5 (OpenAI's latest model)
+# Single session
+npx dotenv -e .env.gpt5 -- npm start
+
+# Continuous trading (every 30 minutes during market hours)
+npx dotenv -e .env.gpt5 -- npm run start:continuous
+
+# Continuous with different intervals
+npx dotenv -e .env.gpt5 -- npm run start:continuous:1h    # Every hour
+npx dotenv -e .env.gpt5 -- npm run start:continuous:4h    # Every 4 hours
 ```
 
-**Note:** Non-OpenAI models have limited compatibility with the OpenAI Agents SDK. OpenAI models are recommended for production use.
+**Note:** 
+- Always use `npx dotenv -e .env.profilename` to ensure all API keys are loaded from the profile files.
 
-### Multi-LLM Trading Setup
-Run multiple AI models simultaneously with separate Alpaca paper trading accounts for head-to-head performance comparison:
+### Profile-Based Trading Setup
+Run the trading agent with profile-based configuration for organized data management:
 
 **Available Profiles:**
-- **GPT-4o Profile** (`.env.gpt4o`) - OpenAI's flagship model
-- **Claude Profile** (`.env.claude`) - Anthropic's Claude 3.5 Sonnet  
-- **Gemini Profile** (`.env.gemini`) - Google's Gemini 2.0 Flash
+- **GPT-5 Profile** (`.env.gpt5`) - OpenAI's latest flagship model (August 2025)
 
 **Setup Steps:**
-1. **Create Multiple Alpaca Paper Trading Accounts:**
+1. **Create Alpaca Paper Trading Account:**
    - Go to [Alpaca Markets](https://app.alpaca.markets/paper/dashboard/overview)
-   - Create separate paper trading accounts for each AI model you want to run
-   - Each account starts with $100,000 virtual capital
-   - Note the API keys for each account
+   - Create a paper trading account
+   - Account starts with $100,000 virtual capital
+   - Note the API keys for the account
 
-2. **Configure Profile Environment Files:**
-   - **GPT-4o**: Configure `.env.gpt4o` with first Alpaca account + OpenAI API key
-   - **Claude**: Configure `.env.claude` with second Alpaca account + Anthropic API key  
-   - **Gemini**: Configure `.env.gemini` with third Alpaca account + Gemini API key
-   - Each profile gets completely isolated data files and trading accounts
+2. **Configure Profile Environment File:**
+   - **GPT-5**: Configure `.env.gpt5` with Alpaca account + OpenAI API key
+   - Profile gets isolated data files and trading account
 
-**Running Multiple Profiles:**
+**Running with Profile:**
 ```bash
-# 3-Way AI Trading Competition
-# Terminal 1: GPT-4o trader
-MODEL=gpt-4o PROFILE_NAME=gpt4o npm run start:continuous
+# GPT-5 trader (OpenAI's latest model)
+npx dotenv -e .env.gpt5 -- npm run start:continuous
 
-# Terminal 2: Claude trader  
-MODEL=claude-3-5-sonnet PROFILE_NAME=claude npm run start:continuous
-
-# Terminal 3: Gemini trader
-MODEL=gemini-2.5-flash PROFILE_NAME=gemini npm run start:continuous
-
-# Single sessions for testing
-MODEL=gpt-4o PROFILE_NAME=gpt4o npm start
-MODEL=claude-3-5-sonnet PROFILE_NAME=claude npm start  
-MODEL=gemini-2.5-flash PROFILE_NAME=gemini npm start
-
-# Alternative: Using dotenv-cli with explicit .env files (may require removing main .env file)
-# dotenv -f .env.gpt4o -- npm start
-# dotenv -f .env.claude -- npm start  
-# dotenv -f .env.gemini -- npm start
+# Different time intervals
+npx dotenv -e .env.gpt5 -- npm run start:continuous:1h    # Every hour
+npx dotenv -e .env.gpt5 -- npm run start:continuous:4h    # Every 4 hours
 ```
 
 **Profile Isolation & Performance Tracking:**
-- **Separate Data Files:** Each AI gets its own `thread-{profile}.json`, `README-{profile}.md`, `agent-{profile}.log`
-- **Individual Dashboards:** `README-gpt4o.md`, `README-claude.md`, `README-gemini.md`
-- **Separate CSV Reports:** `pnl_gpt-4o_{date}.csv`, `pnl_claude-3-5-sonnet_{date}.csv`, `pnl_gemini-2.0-flash_{date}.csv`
-- **Separate Alpaca Accounts:** Complete account and P&L isolation ($100k each)
-- **Can Run Simultaneously:** No file conflicts or shared state
-- **Real-Time Comparison:** Compare performance across all models simultaneously
+- **Separate Data Files:** Profile gets its own `thread-{profile}.json`, `README-{profile}.md`, `agent-{profile}.log`
+- **Individual Dashboard:** `README-gpt5.md`
+- **Separate CSV Reports:** `pnl_gpt-5_{date}.csv`
+- **Dedicated Alpaca Account:** Complete account isolation ($100k)
 
 **Prerequisites:**
 Install dotenv-cli if not already installed:
@@ -112,14 +93,49 @@ Install dotenv-cli if not already installed:
 npm install -g dotenv-cli
 ```
 
-**AI Model Comparison Use Cases:**
-- **Performance Benchmarking:** Which AI generates better returns?
-- **Strategy Differences:** How do different models approach the same market conditions?
-- **Risk Management:** Which AI handles volatility better?
-- **Market Adaptation:** How quickly does each AI adapt to market changes?
+### Testing Framework
+The project includes a comprehensive Jest-based testing suite with mock APIs for safe testing:
 
-### No Testing Framework
-The project does not have tests configured. The `npm test` command will output an error message.
+#### Test Commands
+- `npm test` - Run all tests
+- `npm run test:watch` - Run tests in watch mode (auto-restart on changes)
+- `npm run test:coverage` - Run tests with coverage report
+- `npm run test:ci` - Run tests for CI environment (no watch mode)
+- `npm run test:agents` - Test agent functionality end-to-end
+- `npm run test:agents:verbose` - Run agent tests with detailed output
+- `npm run test:trading` - Test trading service functions only
+- `npm run test:all` - Run all tests sequentially
+
+#### Test Types
+1. **Agent Integration Tests** (`agents.test.ts`):
+   - Real agent execution with 45-second timeout
+   - Tool availability validation (think, buy, sell, short_sell, etc.)
+   - API integration verification
+   - Configuration and environment testing
+
+2. **Trading Service Tests** (`trading.test.ts`):
+   - Stock price fetching (Alpaca → Yahoo Finance → fallback)
+   - Portfolio management (account, positions, orders)
+   - Buy/sell operations with validation
+   - Net worth calculations and CAGR
+   - Web search functionality
+
+3. **Unit Tests** (`trading-simple.test.ts`):
+   - Core mathematical functions (CAGR calculations)
+   - Schema validation for portfolio data
+   - Utility function testing
+
+#### Mock Framework
+- **Safe Testing**: All tests use mock APIs - no real trading
+- **Comprehensive Mocks**: Alpaca API, Yahoo Finance, OpenAI simulation
+- **Realistic Data**: Proper market data for thorough testing
+- **Error Simulation**: Tests failure scenarios and recovery mechanisms
+
+#### Test Coverage
+- API failures and fallback mechanisms
+- Edge cases (insufficient funds, missing positions)
+- Data validation and type checking
+- Real agent execution in controlled environment
 
 ## Architecture
 
@@ -200,30 +216,15 @@ Portfolio data is now sourced from Alpaca paper trading account:
 The trading agent implements advanced caching to reduce costs and improve response times:
 
 ### OpenAI Automatic Caching
-- **Automatic Activation**: Enabled by default for all OpenAI models (GPT-4o, GPT-4o-mini, o1-preview, o1-mini)
+- **Automatic Activation**: Enabled by default for all OpenAI models (GPT-5, GPT-5-mini, GPT-5-nano, GPT-4o, GPT-4o-mini, o1-preview, o1-mini)
 - **Cost Savings**: 50% discount on cached tokens (prompts >1,024 tokens)
 - **Performance**: Faster response times for repeated system prompts
+- **GPT-5 Enhanced**: GPT-5 models benefit from improved caching efficiency
 - **Monitoring**: Cache hit information logged in trading sessions
 - **No Configuration**: Works automatically, no setup required
 
-### Gemini Explicit Caching
-- **Dual Caching**: Both implicit (automatic) and explicit (configurable) caching
-- **Implicit Caching**: 75% cost discount on Gemini 2.5 models (automatic)
-- **Explicit Caching**: System prompt cached with customizable TTL (Time To Live)
-- **Configuration**: Set `CACHE_TTL_SECONDS` (default: 3600s/1 hour) and `ENABLE_EXPLICIT_CACHING`
-- **Smart Management**: Automatic cache creation, reuse, and expiry handling
-
-### Caching Configuration
-```bash
-# Cache TTL for Gemini explicit caching (seconds)
-CACHE_TTL_SECONDS=3600
-
-# Enable/disable explicit caching for Gemini
-ENABLE_EXPLICIT_CACHING=true
-```
-
 ### Benefits for Trading
-- **Lower Costs**: 50-75% savings on system prompt processing
+- **Lower Costs**: 50% savings on system prompt processing
 - **Faster Decisions**: Reduced latency for time-sensitive trades
 - **Consistent Strategy**: Same cached system prompt ensures uniform trading rules
 - **Better ROI**: Cost savings mean more budget available for actual trading

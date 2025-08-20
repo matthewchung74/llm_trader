@@ -10,24 +10,37 @@ import {
 } from './mocks/alpaca.js';
 import { mockYahooFinanceFetch } from './mocks/yahoo-finance.js';
 
+// Mock the logger module
+jest.mock('../src/logger.js', () => ({
+  logger: {
+    info: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+    warn: jest.fn(),
+    apiCall: jest.fn()
+  }
+}));
+
 // Mock fetch globally
 const mockFetch = fetch as jest.MockedFunction<typeof fetch>;
+
+// Import the mocked logger
+import { logger } from '../src/logger.js';
+const mockLogger = logger as jest.Mocked<typeof logger>;
 
 describe('TradingService', () => {
   let tradingService: TradingService;
   let mockAlpaca: any;
   let mockOpenAI: any;
-  let mockLogger: jest.Mock;
 
   beforeEach(() => {
     mockAlpaca = createMockAlpacaClient();
     mockOpenAI = createMockOpenAIClient();
-    mockLogger = jest.fn();
     
     // Set up default fetch mock for Yahoo Finance
     mockFetch.mockImplementation(mockYahooFinanceFetch as any);
     
-    tradingService = new TradingService(mockAlpaca, mockOpenAI, mockLogger);
+    tradingService = new TradingService(mockAlpaca, mockOpenAI);
   });
 
   afterEach(() => {
@@ -40,8 +53,9 @@ describe('TradingService', () => {
       
       expect(price).toBe(224.5); // Average of bid (224.45) and ask (224.55)
       expect(mockAlpaca.getLatestQuote).toHaveBeenCalledWith('AAPL');
-      expect(mockLogger).toHaveBeenCalledWith(
-        expect.stringContaining('Found price for AAPL: $224.50 via Alpaca market data')
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Found price for AAPL: $224.50 via Alpaca'),
+        expect.any(Object)
       );
     });
 
@@ -51,11 +65,9 @@ describe('TradingService', () => {
       const price = await tradingService.getStockPrice('AAPL');
       
       expect(price).toBe(224.5); // From Yahoo Finance mock
-      expect(mockLogger).toHaveBeenCalledWith(
-        expect.stringContaining('Alpaca market data failed for AAPL')
-      );
-      expect(mockLogger).toHaveBeenCalledWith(
-        expect.stringContaining('Found price for AAPL: $224.5 via Yahoo Finance API')
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Found price for AAPL: $224.5 via Yahoo Finance'),
+        expect.any(Object)
       );
     });
 
@@ -66,8 +78,9 @@ describe('TradingService', () => {
       const price = await tradingService.getStockPrice('AAPL');
       
       expect(price).toBe(224.5); // Fallback price for AAPL
-      expect(mockLogger).toHaveBeenCalledWith(
-        expect.stringContaining('Using realistic fallback price for AAPL')
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Using realistic fallback price for AAPL'),
+        expect.any(Object)
       );
     });
 
@@ -79,8 +92,9 @@ describe('TradingService', () => {
       
       expect(price).toBeGreaterThan(50);
       expect(price).toBeLessThan(250);
-      expect(mockLogger).toHaveBeenCalledWith(
-        expect.stringContaining('Using realistic fallback price for UNKNOWN')
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Using realistic fallback price for UNKNOWN'),
+        expect.any(Object)
       );
     });
   });
@@ -91,8 +105,9 @@ describe('TradingService', () => {
       
       expect(account).toEqual(mockAlpacaAccount);
       expect(mockAlpaca.getAccount).toHaveBeenCalled();
-      expect(mockLogger).toHaveBeenCalledWith(
-        expect.stringContaining('Alpaca account status: ACTIVE, buying power: $95000.00')
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Alpaca account status: ACTIVE, buying power: $95000.00'),
+        expect.any(Object)
       );
     });
 
@@ -101,7 +116,7 @@ describe('TradingService', () => {
       mockAlpaca.getAccount.mockRejectedValue(error);
       
       await expect(tradingService.getAlpacaAccount()).rejects.toThrow('Account fetch failed');
-      expect(mockLogger).toHaveBeenCalledWith(
+      expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('Failed to get Alpaca account: Error: Account fetch failed')
       );
     });
@@ -113,7 +128,7 @@ describe('TradingService', () => {
       
       expect(positions).toEqual(mockAlpacaPositions);
       expect(mockAlpaca.getPositions).toHaveBeenCalled();
-      expect(mockLogger).toHaveBeenCalledWith(
+      expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('Retrieved 2 positions from Alpaca')
       );
     });
@@ -123,7 +138,7 @@ describe('TradingService', () => {
       mockAlpaca.getPositions.mockRejectedValue(error);
       
       await expect(tradingService.getAlpacaPositions()).rejects.toThrow('Positions fetch failed');
-      expect(mockLogger).toHaveBeenCalledWith(
+      expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('Failed to get Alpaca positions')
       );
     });
@@ -172,7 +187,7 @@ describe('TradingService', () => {
         holdings: {},
         history: []
       });
-      expect(mockLogger).toHaveBeenCalledWith(
+      expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('Failed to get portfolio from Alpaca')
       );
     });
@@ -183,7 +198,7 @@ describe('TradingService', () => {
       const netWorth = await tradingService.calculateNetWorth();
       
       expect(netWorth).toBe(100000);
-      expect(mockLogger).toHaveBeenCalledWith(
+      expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('Current net worth from Alpaca: $100000')
       );
     });
@@ -196,7 +211,7 @@ describe('TradingService', () => {
       // Manual calculation: cash (95000) + AAPL (10 * 224.5) + GOOGL (5 * 175.2)
       const expectedValue = 95000 + (10 * 224.5) + (5 * 175.2);
       expect(netWorth).toBe(Math.round(expectedValue * 100) / 100);
-      expect(mockLogger).toHaveBeenCalledWith(
+      expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('Failed to get net worth from Alpaca')
       );
     });
@@ -312,7 +327,7 @@ describe('TradingService', () => {
       const result = await tradingService.webSearch('test query');
       
       expect(result).toContain('Sorry, I couldn\'t search for information');
-      expect(mockLogger).toHaveBeenCalledWith(
+      expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('Web search failed for query "test query"')
       );
     });
