@@ -879,14 +879,14 @@ const loadThread = async (): Promise<AgentInputItem[]> => {
 const saveThread = async (thread: AgentInputItem[]) => {
   const threadFile = `results/${profileName}/thread-${profileName}.json`;
   try {
-    // Limit thread size to prevent unbounded growth
-    const maxItems = 40; // ~10 conversations worth of context
+    // Limit thread size to prevent unbounded growth and reduce token usage
+    const maxItems = 12; // ~3 conversations worth of context (reduced from 40 to save tokens)
     const trimmedThread = thread.slice(-maxItems);
     
     await writeFile(threadFile, JSON.stringify(trimmedThread, null, 2));
     
     if (thread.length > maxItems) {
-      log(`💾 Saved thread history (${thread.length} → ${trimmedThread.length} items, trimmed to last 10 sessions)`);
+      log(`💾 Saved thread history (${thread.length} → ${trimmedThread.length} items, trimmed to last 3 sessions)`);
     } else {
       log(`💾 Saved thread history (${thread.length} items)`);
     }
