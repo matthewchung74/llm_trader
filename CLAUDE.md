@@ -20,7 +20,10 @@ This is an autonomous AI-powered stock trading agent built with OpenAI's Agents 
 ### 🚨 Important: Running with Profile Environment Files
 **RECOMMENDED APPROACH:** Use `npx dotenv -e .env.profilename` to load all API keys:
 ```bash
-# Correct way - loads all API keys from .env.gpt5
+# Correct way - loads all API keys from .env.gpt5mini (RECOMMENDED)
+npx dotenv -e .env.gpt5mini -- npm run start:continuous
+
+# Alternative - GPT-5 premium model (may hit rate limits)
 npx dotenv -e .env.gpt5 -- npm run start:continuous
 ```
 The dotenv approach is required because API keys are stored in the profile-specific .env files.
@@ -32,33 +35,49 @@ The dotenv approach is required because API keys are stored in the profile-speci
 - See **Testing Framework** section below for comprehensive details
 
 ### Supported AI Models
-**GPT-5** (OpenAI's latest flagship model, August 2025)
-- Best performance for trading decisions
-- Enhanced reasoning and market analysis
+**GPT-5 Mini** (OpenAI's latest efficient model, August 2025) - **RECOMMENDED**
+- Excellent performance for trading decisions
+- Superior rate limits (no 429 errors)
+- Cost-effective with fast execution
+- Configured in `.env.gpt5mini`
+
+**GPT-5** (OpenAI's flagship model)
+- Best reasoning and market analysis
+- Limited rate limits (30k tokens/min)
+- Higher costs but premium performance
 - Configured in `.env.gpt5`
 
 **How to Run Trading Agents:**
 ```bash
-# GPT-5 (OpenAI's latest model)
+# GPT-5 Mini (RECOMMENDED - Best rate limits)
+# Single session
+npx dotenv -e .env.gpt5mini -- npm start
+
+# Continuous trading (every 30 minutes during market hours)
+npx dotenv -e .env.gpt5mini -- npm run start:continuous
+
+# Continuous with different intervals
+npx dotenv -e .env.gpt5mini -- npm run start:continuous:1h    # Every hour
+npx dotenv -e .env.gpt5mini -- npm run start:continuous:4h    # Every 4 hours
+
+# GPT-5 (Premium option - may hit rate limits)
 # Single session
 npx dotenv -e .env.gpt5 -- npm start
 
 # Continuous trading (every 30 minutes during market hours)
 npx dotenv -e .env.gpt5 -- npm run start:continuous
-
-# Continuous with different intervals
-npx dotenv -e .env.gpt5 -- npm run start:continuous:1h    # Every hour
-npx dotenv -e .env.gpt5 -- npm run start:continuous:4h    # Every 4 hours
 ```
 
 **Note:** 
-- Always use `npx dotenv -e .env.profilename` to ensure all API keys are loaded from the profile files.
+- GPT-5 Mini is recommended for production use due to better rate limits and cost efficiency
+- Always use `npx dotenv -e .env.profilename` to ensure all API keys are loaded from the profile files
 
 ### Profile-Based Trading Setup
 Run the trading agent with profile-based configuration for organized data management:
 
 **Available Profiles:**
-- **GPT-5 Profile** (`.env.gpt5`) - OpenAI's latest flagship model (August 2025)
+- **GPT-5 Mini Profile** (`.env.gpt5mini`) - Recommended for production trading
+- **GPT-5 Profile** (`.env.gpt5`) - Premium model with rate limits
 
 **Setup Steps:**
 1. **Create Alpaca Paper Trading Account:**
@@ -68,23 +87,27 @@ Run the trading agent with profile-based configuration for organized data manage
    - Note the API keys for the account
 
 2. **Configure Profile Environment File:**
+   - **GPT-5 Mini**: Configure `.env.gpt5mini` with Alpaca account + OpenAI API key (RECOMMENDED)
    - **GPT-5**: Configure `.env.gpt5` with Alpaca account + OpenAI API key
-   - Profile gets isolated data files and trading account
+   - Each profile gets isolated data files and trading account
 
 **Running with Profile:**
 ```bash
-# GPT-5 trader (OpenAI's latest model)
+# GPT-5 Mini trader (RECOMMENDED)
+npx dotenv -e .env.gpt5mini -- npm run start:continuous
+
+# GPT-5 trader (premium option)
 npx dotenv -e .env.gpt5 -- npm run start:continuous
 
 # Different time intervals
-npx dotenv -e .env.gpt5 -- npm run start:continuous:1h    # Every hour
-npx dotenv -e .env.gpt5 -- npm run start:continuous:4h    # Every 4 hours
+npx dotenv -e .env.gpt5mini -- npm run start:continuous:1h    # Every hour
+npx dotenv -e .env.gpt5mini -- npm run start:continuous:4h    # Every 4 hours
 ```
 
 **Profile Isolation & Performance Tracking:**
 - **Separate Data Files:** Profile gets its own `thread-{profile}.json`, `README-{profile}.md`, `agent-{profile}.log`
-- **Individual Dashboard:** `README-gpt5.md`
-- **Separate CSV Reports:** `pnl_gpt-5_{date}.csv`
+- **Individual Dashboards:** `README-gpt5mini.md`, `README-gpt5.md`
+- **Separate CSV Reports:** `pnl_gpt-5-mini_{date}.csv`, `pnl_gpt-5_{date}.csv`
 - **Dedicated Alpaca Account:** Complete account isolation ($100k)
 
 **Prerequisites:**
