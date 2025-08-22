@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # GPT-5 Mini Trading Agent (Recommended)
   trading-agent-gpt5mini:
@@ -7,6 +5,9 @@ services:
     container_name: priced-in-gpt5mini
     env_file:
       - .env.gpt5mini
+    environment:
+      - MODEL=gpt-5-mini
+      - PROFILE_NAME=gpt5mini
     volumes:
       - ./results:/app/results
       - ./logs:/app/logs
