@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  # GPT-5 Mini Trading Agent (Recommended)
+  trading-agent-gpt5mini:
+    build: .
+    container_name: priced-in-gpt5mini
+    env_file:
+      - .env.gpt5mini
+    volumes:
+      - ./results:/app/results
+      - ./logs:/app/logs
+    command: npm run start:continuous
+    restart: unless-stopped
+    profiles:
+      - gpt5mini
+    
+  # GPT-5 Trading Agent
+  trading-agent-gpt5:
+    build: .
+    container_name: priced-in-gpt5
+    env_file:
+      - .env.gpt5
+    volumes:
+      - ./results:/app/results
+      - ./logs:/app/logs
+    command: npm run start:continuous
+    restart: unless-stopped
+    profiles:
+      - gpt5
+
+  # Single session runner (for testing)
+  trading-agent-single:
+    build: .
+    container_name: priced-in-single
+    env_file:
+      - .env.gpt5mini
+    volumes:
+      - ./results:/app/results
+      - ./logs:/app/logs
+    command: npm start
+    profiles:
+      - single
+
+networks:
+  default:
+    name: priced-in-network

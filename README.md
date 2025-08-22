@@ -75,6 +75,67 @@ The agent automatically:
 - ✅ **Trades every 30 minutes** during market hours (9:30 AM - 4:00 PM EST)
 - ✅ **Handles timezone conversion** automatically
 
+## Docker Deployment
+
+### Quick Start with Docker
+
+Deploy the trading agent on any machine with Docker:
+
+```bash
+# Build and run GPT-5 Mini agent (recommended)
+docker-compose --profile gpt5mini up --build
+
+# Build and run GPT-5 agent (premium)
+docker-compose --profile gpt5 up --build
+
+# Run single trading session (for testing)
+docker-compose --profile single up --build
+```
+
+### Environment Setup
+
+Create your environment files:
+
+```bash
+# .env.gpt5mini (recommended)
+OPENAI_API_KEY=your_openai_api_key
+ALPACA_API_KEY=your_alpaca_api_key
+ALPACA_SECRET_KEY=your_alpaca_secret_key
+ALPACA_BASE_URL=https://paper-api.alpaca.markets
+
+# .env.gpt5 (premium option)
+OPENAI_API_KEY=your_openai_api_key
+ALPACA_API_KEY=your_alpaca_api_key
+ALPACA_SECRET_KEY=your_alpaca_secret_key
+ALPACA_BASE_URL=https://paper-api.alpaca.markets
+```
+
+### Docker Features
+
+- **Data Persistence**: Trading data and logs persist in `./results` and `./logs`
+- **Auto Restart**: Container automatically restarts unless manually stopped
+- **Health Checks**: Built-in monitoring of agent processes
+- **Multiple Profiles**: Separate containers for different AI models
+
+### Manual Docker Commands
+
+```bash
+# Build image
+docker build -t priced-in .
+
+# Run continuous trading
+docker run -d --env-file .env.gpt5mini \
+  -v $(pwd)/results:/app/results \
+  -v $(pwd)/logs:/app/logs \
+  --name trading-bot priced-in
+
+# View logs
+docker logs -f trading-bot
+
+# Stop container
+docker stop trading-bot
+```
+
 ## Trading Strategy
 
 The agent follows a momentum-based trading strategy, focusing on:

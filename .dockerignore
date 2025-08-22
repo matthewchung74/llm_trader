@@ -1,0 +1,14 @@
+node_modules
+.git
+.gitignore
+README.md
+.env*
+!.env.example
+results/*/thread-*.json
+results/*/thread-*.json.corrupted-*
+*.log
+.DS_Store
+coverage
+.nyc_output
+*.tmp
+*.temp

@@ -257,6 +257,67 @@ The trading agent implements advanced caching to reduce costs and improve respon
 - CSV reports include cache configuration information
 - Hit rates and cost savings displayed in logs
 
+## Docker Deployment
+
+### Building and Running with Docker
+
+The trading agent can be containerized for deployment on any machine with Docker:
+
+#### Prerequisites
+- Docker and Docker Compose installed
+- Environment files configured (`.env.gpt5mini`, `.env.gpt5`)
+
+#### Quick Start
+```bash
+# Build and run GPT-5 Mini agent (recommended)
+docker-compose --profile gpt5mini up --build
+
+# Build and run GPT-5 agent
+docker-compose --profile gpt5 up --build
+
+# Run single trading session (for testing)
+docker-compose --profile single up --build
+```
+
+#### Environment Setup
+Create your environment files before running:
+```bash
+# .env.gpt5mini (recommended)
+OPENAI_API_KEY=your_openai_api_key
+ALPACA_API_KEY=your_alpaca_api_key
+ALPACA_SECRET_KEY=your_alpaca_secret_key
+ALPACA_BASE_URL=https://paper-api.alpaca.markets
+
+# .env.gpt5 (premium option)
+OPENAI_API_KEY=your_openai_api_key
+ALPACA_API_KEY=your_alpaca_api_key
+ALPACA_SECRET_KEY=your_alpaca_secret_key
+ALPACA_BASE_URL=https://paper-api.alpaca.markets
+```
+
+#### Data Persistence
+- Trading data persists in `./results` directory
+- Logs persist in `./logs` directory
+- Container automatically restarts unless manually stopped
+
+#### Docker Commands
+```bash
+# Build image
+docker build -t priced-in .
+
+# Run continuous trading
+docker run -d --env-file .env.gpt5mini -v $(pwd)/results:/app/results --name trading-bot priced-in
+
+# Run single session
+docker run --env-file .env.gpt5mini -v $(pwd)/results:/app/results priced-in npm start
+
+# View logs
+docker logs -f trading-bot
+
+# Stop container
+docker stop trading-bot
+```
+
 ## Important Notes
 
 - The agent requires `OPENAI_API_KEY` environment variable
