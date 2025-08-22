@@ -272,11 +272,6 @@ The trading agent can be containerized for deployment on any machine with Docker
 # Build and run GPT-5 Mini agent (recommended)
 docker-compose --profile gpt5mini up --build
 
-# Build and run GPT-5 agent
-docker-compose --profile gpt5 up --build
-
-# Run single trading session (for testing)
-docker-compose --profile single up --build
 ```
 
 #### Environment Setup
