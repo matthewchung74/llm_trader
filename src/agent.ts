@@ -1120,6 +1120,9 @@ if (!modelName.includes('gemini')) {
       getPortfolioTool,
       getNetWorthTool,
     ],
+    // Enable structured reasoning for function calls
+    tool_choice: "auto",
+    parallel_tool_calls: false
   };
   
   // Only add custom client for non-OpenAI models (shouldn't happen since we filtered out Gemini)

@@ -934,6 +934,9 @@ const agent = new Agent({
     getPortfolioTool,
     getNetWorthTool,
   ],
+  // Enable structured reasoning for function calls
+  tool_choice: "auto",
+  parallel_tool_calls: false
 });
 
 log(`🤖 Created OpenAI Agent with model: ${normalizedModel}`);
