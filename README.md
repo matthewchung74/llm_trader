@@ -13,7 +13,7 @@ This trading agent starts with virtual capital and attempts to grow the portfoli
 ### 📊 Current Active Trading
 
 **Profile: GPT-5 Mini** - $50,426.73 portfolio value
-- **Performance**: Strong gains from initial $50,000 virtual capital
+- **Performance**: Modest gains from initial $50,000 virtual capital (+0.85%)
 - **Recent Activity**: Active trading in NVDA, AMZN, MSFT, QQQ, AAPL, and others
 - **Latest P&L Report**: `results/gpt5mini/pnl_gpt-5-mini_2025-08-28.csv` with 101 trades
 - **Detailed Portfolio**: See `results/gpt5mini/README-gpt5mini.md`
@@ -40,7 +40,7 @@ This trading agent starts with virtual capital and attempts to grow the portfoli
 ### Prerequisites
 1. **Alpaca Paper Trading Account**
    - Sign up at [Alpaca Markets](https://app.alpaca.markets/paper/dashboard/overview)
-   - Account starts with $100,000 virtual capital
+   - Account starts with $100,000 virtual capital (this implementation uses $50,000)
    - Get your API keys from the dashboard
 
 2. **OpenAI API Key**
