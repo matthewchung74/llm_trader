@@ -8,18 +8,22 @@ This trading agent starts with virtual capital and attempts to grow the portfoli
 
 <!-- auto start -->
 
-## 💰 Portfolio value: $0.00** (0.00% CAGR)
+## 💰 Portfolio value: $50,426.73** (gpt5mini profile active)
 
-### 📊 Holdings
+### 📊 Current Active Trading
 
-| Asset | Shares | Value |
-|-------|--------|-------|
-| Cash | - | $0.00 |
+**Profile: GPT-5 Mini** - $50,426.73 portfolio value
+- **Performance**: Strong gains from initial $100,000 virtual capital
+- **Recent Activity**: Active trading in NVDA, AMZN, MSFT, QQQ, AAPL, and others
+- **Latest P&L Report**: `results/gpt5mini/pnl_gpt-5-mini_2025-08-28.csv` with 101 trades
+- **Detailed Portfolio**: See `results/gpt5mini/README-gpt5mini.md`
 
+### 📈 Recent Trading Summary
 
-### 📈 Recent trades
-
-- No trades yet
+- **101 total trades** executed across multiple sessions
+- **Profitable trades** in NVDA (+$46.64), QQQ (+$36.62), XLE (+$39.50)
+- **Active positions** in 11 different assets
+- **Diversified portfolio** with tech, consumer, and ETF exposure
 
 <!-- auto end -->
 

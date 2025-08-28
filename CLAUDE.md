@@ -326,3 +326,29 @@ docker stop trading-bot
 - Agent must use `think` tool before making any decisions (mandatory thinking process)
 - Thread history is persisted across runs for conversation continuity
 - Orders are submitted as market orders and filled according to Alpaca's simulation engine
+
+## Error Prevention & Recovery
+
+The system includes several safeguards to prevent the "function_call without reasoning" error that can occur with GPT-5+ models:
+
+### 1. **Startup Health Check**
+- Automatically validates thread integrity on startup
+- Detects function calls missing corresponding reasoning items
+- Auto-cleans corrupted threads before they cause issues
+
+### 2. **Thread Corruption Detection**
+- Proactive scanning for reasoning/function call mismatches during thread loading
+- Automatic backup and cleanup of corrupted thread files
+- Prevention of thread size growth beyond manageable limits
+
+### 3. **Runtime Error Recovery**
+- Automatic detection of OpenAI reasoning errors during execution
+- One-time retry with clean thread when errors occur
+- Graceful fallback to ensure trading sessions continue
+
+### 4. **Thread Management**
+- Thread history is automatically trimmed to prevent unbounded growth
+- Corrupted threads are backed up with timestamps for debugging
+- Clean thread initialization when validation fails
+
+These safeguards ensure the trading agent remains operational even when OpenAI's API requirements change or thread corruption occurs.
