@@ -13,7 +13,7 @@ This trading agent starts with virtual capital and attempts to grow the portfoli
 ### 📊 Current Active Trading
 
 **Profile: GPT-5 Mini** - $50,426.73 portfolio value
-- **Performance**: Strong gains from initial $100,000 virtual capital
+- **Performance**: Strong gains from initial $50,000 virtual capital
 - **Recent Activity**: Active trading in NVDA, AMZN, MSFT, QQQ, AAPL, and others
 - **Latest P&L Report**: `results/gpt5mini/pnl_gpt-5-mini_2025-08-28.csv` with 101 trades
 - **Detailed Portfolio**: See `results/gpt5mini/README-gpt5mini.md`
