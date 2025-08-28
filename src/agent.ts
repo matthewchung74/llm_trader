@@ -19,6 +19,8 @@ const getProfileName = (): string => {
     // Check if profile name matches model type
     const isValidMatch = 
       (modelName.includes('gpt-4o') && profileName === 'gpt4o') ||
+      (modelName.includes('gpt-5') && profileName === 'gpt5mini') ||
+      (modelName.includes('gpt-5') && profileName === 'gpt5') ||
       (modelName.includes('claude') && profileName === 'claude') ||
       (profileName === 'default');
     
@@ -33,6 +35,10 @@ const getProfileName = (): string => {
   // Auto-detect profile from model name
   if (modelName.includes('gpt-4o')) {
     return 'gpt4o';
+  } else if (modelName.includes('gpt-5-mini')) {
+    return 'gpt5mini';
+  } else if (modelName.includes('gpt-5')) {
+    return 'gpt5';
   } else if (modelName.includes('claude')) {
     return 'claude';
   }
@@ -1511,12 +1517,49 @@ const isMarketOpen = (): boolean => {
 const getNextMarketOpen = (): Date => {
   const now = new Date();
   
-  // Create a date object for tomorrow at 9:30 AM ET
+  // If markets are currently open, next open is tomorrow
+  if (isMarketOpen()) {
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const nextOpen = new Date(Date.UTC(
+      tomorrow.getFullYear(),
+      tomorrow.getMonth(), 
+      tomorrow.getDate(),
+      13, 30, 0, 0  // 9:30 AM ET = 13:30 UTC (EDT)
+    ));
+    
+    // Handle weekends
+    if (nextOpen.getDay() === 6) {
+      nextOpen.setDate(nextOpen.getDate() + 2);
+    } else if (nextOpen.getDay() === 0) {
+      nextOpen.setDate(nextOpen.getDate() + 1);
+    }
+    
+    return nextOpen;
+  }
+  
+  // Markets are closed, check if today's market hasn't opened yet
+  const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const dayOfWeek = et.getDay();
+  const hours = et.getHours();
+  const minutes = et.getMinutes();
+  const timeInMinutes = hours * 60 + minutes;
+  const marketOpen = 9 * 60 + 30; // 9:30 AM
+  
+  // If it's a weekday and before market open, market opens today
+  if (dayOfWeek >= 1 && dayOfWeek <= 5 && timeInMinutes < marketOpen) {
+    // Use the ET date components for today's market open
+    return new Date(Date.UTC(
+      et.getFullYear(),
+      et.getMonth(), 
+      et.getDate(),
+      13, 30, 0, 0  // 9:30 AM ET = 13:30 UTC (EDT)
+    ));
+  }
+  
+  // Market is closed for today, next open is tomorrow
   const tomorrow = new Date(now);
   tomorrow.setDate(tomorrow.getDate() + 1);
-  
-  // Set to 9:30 AM ET (13:30 UTC in summer, 14:30 UTC in winter)
-  // For simplicity, we'll use 13:30 UTC (EDT summer time)
   const nextOpen = new Date(Date.UTC(
     tomorrow.getFullYear(),
     tomorrow.getMonth(), 
@@ -1524,12 +1567,10 @@ const getNextMarketOpen = (): Date => {
     13, 30, 0, 0  // 9:30 AM ET = 13:30 UTC (EDT)
   ));
   
-  // If tomorrow is Saturday, move to Monday
+  // Handle weekends
   if (nextOpen.getDay() === 6) {
     nextOpen.setDate(nextOpen.getDate() + 2);
-  }
-  // If tomorrow is Sunday, move to Monday  
-  else if (nextOpen.getDay() === 0) {
+  } else if (nextOpen.getDay() === 0) {
     nextOpen.setDate(nextOpen.getDate() + 1);
   }
   

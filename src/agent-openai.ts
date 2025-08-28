@@ -687,10 +687,26 @@ const loadThread = async (): Promise<AgentInputItem[]> => {
       const fullThread = JSON.parse(threadData);
       
       // Check for thread corruption indicators
+      const functionCalls = fullThread.filter((item: any) => item.type === 'function_call');
+      const reasoningItems = fullThread.filter((item: any) => item.type === 'reasoning');
+      
       const hasCorruption = fullThread.some((item: any) => 
         item.callId === 'call_en9S0pLVBoYjEcU4hnyuVl5X' || // GPT-4o specific corruption
         (item.type === 'function_call_result' && !fullThread.find((call: any) => call.callId === item.callId && call.type === 'function_call'))
       );
+      
+      // Check for OpenAI structured reasoning mismatch (function calls without reasoning)
+      const hasReasoningMismatch = functionCalls.some((fc: any) => {
+        if (!fc.id || !fc.id.startsWith('fc_')) return false;
+        const expectedReasoningId = fc.id.replace('fc_', 'rs_');
+        return !reasoningItems.some((rs: any) => rs.id === expectedReasoningId);
+      });
+      
+      if (hasReasoningMismatch) {
+        log(`🔧 Thread contains function calls without corresponding reasoning items - required for GPT-5+ models. Resetting thread.`);
+        await writeFile(`${threadFile}.corrupted-${Date.now()}`, threadData);
+        return [];
+      }
       
       if (hasCorruption) {
         log(`🔧 Thread corruption detected (stale tool call IDs), resetting thread for clean start`);
@@ -1068,6 +1084,47 @@ const runOpenAITradingSession = async (): Promise<void> => {
     await generateCSVReport();
     
   } catch (error) {
+    const errorMessage = String(error);
+    
+    // Check for specific OpenAI reasoning/function call mismatch error
+    if (errorMessage.includes('function_call') && errorMessage.includes('reasoning') && errorMessage.includes('required')) {
+      log(`🔧 Detected function call/reasoning mismatch error. Clearing corrupted thread and retrying...`);
+      
+      // Backup the corrupted thread
+      const threadFile = `results/${profileName}/thread-${profileName}.json`;
+      try {
+        const threadData = await readFile(threadFile, "utf-8");
+        await writeFile(`${threadFile}.reasoning-error-${Date.now()}`, threadData);
+        await writeFile(threadFile, JSON.stringify([], null, 2));
+        log(`🧹 Thread cleared, backed up to ${threadFile}.reasoning-error-${Date.now()}`);
+        
+        // Retry once with clean thread
+        log(`🔄 Retrying trading session with clean thread...`);
+        const emptyThread: AgentInputItem[] = [];
+        const currentNetWorth = await calculateNetWorth();
+        const result = await withRetry(async () => {
+          return await run(
+            agent,
+            emptyThread.concat({
+              role: "user",
+              content: `It's ${new Date().toLocaleString(
+                "en-US"
+              )}. Fresh start! Review your portfolio, scan the markets for opportunities, and make strategic trades to grow your $${currentNetWorth.toLocaleString()} portfolio. Good luck! 📈`,
+            }),
+            { maxTurns: 100 }
+          );
+        });
+        
+        log(`✅ OpenAI trading session completed after recovery: ${result.finalOutput}`);
+        await saveThread(result.history);
+        await generateCSVReport();
+        return;
+        
+      } catch (recoveryError) {
+        log(`❌ Recovery attempt failed: ${recoveryError}`);
+      }
+    }
+    
     log(`❌ OpenAI trading session failed: ${error}`);
     throw error;
   }
@@ -1170,7 +1227,45 @@ const runContinuous = async (): Promise<void> => {
   }
 };
 
+// Startup health check to prevent reasoning/function call issues
+const performStartupHealthCheck = async (): Promise<void> => {
+  log("🔍 Performing startup health check...");
+  
+  // Check thread health
+  const thread = await loadThread();
+  if (thread.length === 0) {
+    log("✅ Thread is clean (empty)");
+    return;
+  }
+  
+  // Additional validation for edge cases
+  const functionCalls = thread.filter((item: any) => item.type === 'function_call');
+  const reasoningItems = thread.filter((item: any) => item.type === 'reasoning');
+  
+  log(`🔍 Thread contains ${thread.length} items: ${functionCalls.length} function calls, ${reasoningItems.length} reasoning items`);
+  
+  // Check for any orphaned function calls
+  const orphanedCalls = functionCalls.filter((fc: any) => {
+    if (!fc.id || !fc.id.startsWith('fc_')) return false;
+    const expectedReasoningId = fc.id.replace('fc_', 'rs_');
+    return !reasoningItems.some((rs: any) => rs.id === expectedReasoningId);
+  });
+  
+  if (orphanedCalls.length > 0) {
+    log(`🔧 Found ${orphanedCalls.length} orphaned function calls without reasoning items. Auto-cleaning...`);
+    const threadFile = `results/${profileName}/thread-${profileName}.json`;
+    const threadData = await readFile(threadFile, "utf-8");
+    await writeFile(`${threadFile}.health-check-backup-${Date.now()}`, threadData);
+    await writeFile(threadFile, JSON.stringify([], null, 2));
+    log(`🧹 Thread cleaned up during health check`);
+  } else {
+    log("✅ Thread passed health check - all function calls have corresponding reasoning items");
+  }
+};
+
 // Main execution logic
+await performStartupHealthCheck();
+
 if (continuousMode) {
   log("🔄 Continuous mode enabled");
   await runContinuous();
